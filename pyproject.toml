@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "thrum"
+version = "0.0.1"
+description = "Typed operations for durable Python applications."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [
+  { name = "Hunter Kuffel" }
+]
+keywords = ["operations", "durable-execution", "background-jobs", "actors", "mcp", "framework"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/hkuffel/thrum"
+Repository = "https://github.com/hkuffel/thrum"
+Issues = "https://github.com/hkuffel/thrum/issues"
