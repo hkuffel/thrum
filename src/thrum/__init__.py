@@ -5,7 +5,7 @@ from typing import Generic, ParamSpec, TypeVar
 P = ParamSpec("P")
 R = TypeVar("R")
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 
 @dataclass(frozen=True)
