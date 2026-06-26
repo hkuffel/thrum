@@ -46,8 +46,8 @@ class Run(Base):
     # NOTE (ADR-0012): a nullable workflow_run_id FK is a trivial additive v2
     # migration with zero backfill — deliberately omitted now, not foreclosed.
 
-    task_namespace: Mapped[str] = mapped_column(String(255))
-    task_name: Mapped[str] = mapped_column(String(255))
+    operation_namespace: Mapped[str] = mapped_column(String(255))
+    operation_name: Mapped[str] = mapped_column(String(255))
     trigger: Mapped[Trigger] = mapped_column(String(16))
 
     status: Mapped[RunStatus] = mapped_column(String(16), default=RunStatus.pending, index=True)

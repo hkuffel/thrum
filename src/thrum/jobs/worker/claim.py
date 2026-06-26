@@ -99,7 +99,7 @@ async def claim_runs(
             ClaimedRun(
                 run_id=run.id,
                 attempt_id=attempt.id,
-                task_key=f"{run.task_namespace}.{run.task_name}",
+                task_key=f"{run.operation_namespace}.{run.operation_name}",
                 inputs=dict(run.inputs or {}),
             )
         )

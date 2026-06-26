@@ -25,8 +25,8 @@ def enqueue(session: Session, task: Task | str, **inputs: Any) -> Run:
     key = task.key if isinstance(task, Task) else task
     namespace, _, name = key.rpartition(".")
     run = Run(
-        task_namespace=namespace,
-        task_name=name,
+        operation_namespace=namespace,
+        operation_name=name,
         trigger=Trigger.enqueue,
         status=RunStatus.pending,
         inputs=inputs,
