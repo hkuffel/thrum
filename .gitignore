@@ -1,2 +1,30 @@
+# Environment / local config
 .env
+.env.*
 .python-version
+.venv/
+venv/
+
+# Python bytecode & caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Build / packaging artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Project docs not for public release
+docs/prd/
+docs/VISION.md
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/

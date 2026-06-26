@@ -1,0 +1,148 @@
+# Thrum — durable-job slice glossary
+
+A Postgres-native, Python background-jobs system: cron, queues, and workflows as one primitive, backed by the user's own Postgres. This glossary was ported from the standalone runner and fixes the language for the **`thrum.jobs` slice** so the engine, SDK, worker, and dashboard all mean the same thing by the same word.
+
+> **Reconciliation note (Task ↔ operation) — convergence decided, in progress.** The authored unit is the **Operation** (`@operation`); **`@registry.task` is absorbed** and is no longer an authoring surface. The developer writes one `@operation` and reaches the queue through a projection (`op.enqueue(...)`). **Task** survives only as an internal value object the queue projection carries (the execution config it needs at run time) — never a user-facing decorator. The identity contract (`namespace.name`, user-owned, stable across refactors, fail-fast on collision) moves verbatim from Task onto Operation. Config is cut three ways (not "operation vs queue"): **execution nature** (`timeout`, `cpu_bound`) is intrinsic to the Operation and rides on `@operation(...)`; **durability policy** (`retries`, backoff) is an Operation-level *default* that durable projections (queue/timer) inherit and others (HTTP) ignore, also on `@operation(...)`, overridable per-enqueue; **triggers** (`Schedule`) are separate (an Operation has 0..N) and are declared as a co-located `op.schedule(...)` statement under the def, not a second decorator. So there is exactly one decorator and nothing is configured far from the Operation. The rest of the vocabulary (Run, Attempt, Schedule, Lease, Heartbeat, Reaper, Materialization, Fire Time, Trigger) carries over unchanged.
+
+## Language
+
+**Operation**:
+The authored unit and the framework's core primitive (`@operation`). A normal Python function with typed inputs (positional = data) and capabilities (keyword-only — see VISION) that is *projected* onto transports: the queue (`op.enqueue(...)`), HTTP, MCP tools, CLI. The developer authors the Operation once; transports are just ways of reaching it. Its identity is `namespace.name` (inherited from the Registry it attaches to; `name` defaults to the function name) — user-owned, stable across refactors, never derived from import path, fail-fast on collision. A bare `@operation` (the one-file start) falls into the `default` namespace.
+_Avoid_: task (absorbed — no longer an authoring surface), function, handler, route (a route is one projection)
+
+**App**:
+The projection host that wires Operations onto transports (`app.http.post(...)`, `app.tools.expose(...)`, `app.cli.command(...)`). Distinct from a **Registry**: a Registry owns *identity* (it declares the namespace Operations are authored under); the App owns *transports*. One does naming, the other does reaching.
+_Avoid_: registry (that is the namespace grouping), server, framework
+
+**Compile**:
+The startup-time step that turns the collected `@operation` declarations into a validated, ready-to-run whole — resolving each Operation's Capabilities against the (now-populated) capability registry and fully checking its signature. The second phase of two-phase validation. Phase one happens at **decoration** (import time): capture the signature, register identity, fail-fast on collision and structural rules (cron/tz too). Phase two is Compile: fail-fast on a capability-typed param placed positionally, a keyword-only param that looks injectable but matches no registered capability, non-serializable Data, etc. — the fail-fast "compile errors" of the operation model. Compile is **idempotent** and runs **implicitly on first app/worker start** (the guaranteed backstop), and may also be invoked **explicitly** (`app.compile()`) so a developer can slot it into their workflow (and tests/tooling). Produces an in-memory validated registry — no artifact, no cache, no rebuild (distinct from a build step). Generalizes the "fail fast on collision at Worker/registry startup" check the system already does. Seam: the authoring contract owns *that* Compile validates and *when* it phases; the execution grill owns what populates the capability registry and triggers Compile.
+_Avoid_: seal, build (implies a cached artifact), register (that is phase one / decoration), boot, init, validate (too generic)
+
+**Capability**:
+An effect-bearing object the framework constructs and injects into an Operation — the database session, mailer, payment client, LLM gateway, etc. (see VISION §Capabilities). An Operation cannot import these directly; it can only use what the framework hands it. **Discriminator (decided):** a parameter is a Capability iff it is **keyword-only AND its annotated type is registered as a capability type**. Both conditions are necessary — keyword-only alone is not sufficient (a keyword-only param of a non-capability type is optional Data, not a Capability). **Construction (decided, ADR-0024):** a Capability is built per execution by a registered **Provider** and constructed *against the* **Execution Scope**'s transaction — every Capability records its effects into that one transaction, which the scope (not any Provider) commits. The `db` Capability is the most direct case (it *is* the scope's session); external-effect Capabilities (mailer, payments) are recording proxies that stage into the same transaction (see Outbox). A type is "a registered capability type" iff a Provider is registered for it — which is exactly what **Compile** resolves keyword-only params against.
+_Avoid_: dependency, service, injectable (those miss the construct-bind-record properties)
+
+**Provider**:
+The per-Capability factory that knows how to construct one Capability instance for one execution. Registered on the **App** (`app.provide(Session, db_provider)`) — registering a Provider for type `T` is exactly what makes `T` a registered capability type (what **Compile** resolves against). A Provider is an **async context manager**: the Execution Scope enters every needed Provider on a shared **`AsyncExitStack`**, injects the yielded Capabilities, runs the Operation, and unwinds the stack (success or failure) for deterministic resource teardown. A Provider builds its Capability *against the scope's transaction* — it does **not** own the transaction. v1 ships exactly one real Provider (`db`); mailer/payments/LLM slot in later without redesign.
+_Avoid_: factory, resolver, injector, dependency (Providers construct Capabilities specifically, against the execution transaction)
+
+**Caller**:
+The authenticated identity on whose behalf an Operation runs — born at the **transport boundary** (whoever/whatever invoked the Operation through it) and carried by the **Execution Scope** to **Providers**, which **attenuate** Capabilities off it (a read-only Caller's `db` is write-blocked; a tenant-scoped Caller's can't name other tenants' rows; an agent Caller's payment client is amount-capped). Synchronous transports (HTTP/MCP) supply a *live* Caller. The **queue is the exception**: invocation (Enqueue, in the app process) and execution (the Worker, later) are separated in time and process, so the Caller is **frozen onto the Run at Enqueue and thawed into the Scope at execution** — this is what VISION means by the queue transport "restoring caller identity." v1 captures a **system/default** Caller through the real freeze/thaw path (no auth system yet, no attenuation logic), so the construction signature is honest from day one.
+_Avoid_: user (a Caller may be an agent or system, not a human), principal, auth context, request (the request is dead by the time a queued Run executes)
+
+**Execution Scope**:
+The framework-owned context that runs one Attempt: it opens the single execution transaction (informally "Txn 2", distinct from the **Claim** transaction that precedes it and the caller's **Enqueue** transaction in the app process), constructs Capabilities via their Providers against that transaction, invokes the Operation body, records Effects + the completion record, and **commits — so the Operation's effects and "the job finished" are one atomic fact** (VISION Core architectural rule). The transaction belongs to the *scope*, not to any Capability or Provider; the `db` Capability is merely the scope's session surfaced directly. Crash before commit ⇒ nothing landed; the Lease expires and the Reaper returns the Run to claimable (at-least-once, ADR-0014).
+_Avoid_: execution context (too generic), transaction (the scope owns one but is not one), session
+
+**Data**:
+The non-capability parameters of an Operation — its typed inputs. Positional params are required data; keyword-only params of a non-capability type are optional data. **JSON-serializability (IDs not objects — ADR-0006) binds the Operation, not just the queue projection:** every transport crosses a serialization boundary (queue row, HTTP body, MCP tool args, CLI argv), so an Operation whose Data isn't serializable isn't projectable. The same constraint extends to the Operation's **output type** (`Run.output` is JSONB; HTTP encodes it; MCP returns it). Convention: type Data as ID newtypes (`CustomerId`), not ORM objects — the Operation re-fetches via its `db` Capability. Uniformly required of all Operations in v1 (lazy/per-projection enforcement deferred unless the uniformity tax proves burdensome). Distinct from Capabilities, which are injected, never serialized. Enforced at each serialization boundary with clear errors (full static proof of serializability is not attempted), plus an optional lint for known non-serializable annotations.
+_Avoid_: args, payload, params (be specific — Data vs Capability is the load-bearing split)
+
+**Task** _(retired — internal only)_:
+Formerly the authored job primitive (`@registry.task`). **Absorbed by Operation** in the convergence: it is no longer an authoring surface or domain vocabulary. It survives *only* as an internal value object the queue projection carries (the execution config the worker needs at run time). The identity contract it used to own (`namespace.name`, user-owned, stable across refactors, never from import path, fail-fast on collision) now lives on **Operation**. Do not use "Task" in design, docs, or user-facing API; see Flagged ambiguities. The `Task` *class* in code may keep its name until the execution grill rewrites that surface, but human-facing text says Operation.
+_Avoid_: using "Task" as a primary term at all (banned like "job"); function, handler
+
+**Registry**:
+A named grouping that declares a `namespace` once; Operations attach to it (`@billing.operation`) and inherit that namespace. Many Registries exist (e.g. `billing`, `marketing`), which is how two operations both named `send_receipts` coexist without collision. The unit at which namespace is declared — not global, not per-Operation. Distinct from the **App** (which owns transports, not naming).
+_Avoid_: app (that is the projection host), module, router (router means the HTTP concept)
+
+**Schedule**:
+A recurring rule that creates Runs of a Task on a cadence. Holds the cron expression, an **IANA timezone name** (`America/Vancouver`, never a fixed offset), the target Task, and the expected cadence/duration that the SLO engine measures against. The cron + tz pair is the durable *intent* — the recurrence is never stored as precomputed far-future UTC instants (only near-term Fire Times are materialized; see Materialization Horizon). Only cron-triggered work has a Schedule; an ad-hoc Enqueue does not. Declared as a co-located `op.schedule(cron, tz=...)` statement under the Operation def (not a decorator); an Operation may declare 0..N Schedules. The cron + timezone validation fires eagerly at declaration (fail-fast on a typo or fixed-offset tz), as it does today.
+_Avoid_: cron, periodic task, trigger (trigger is the general category)
+
+**Run**:
+The central primitive — a single durable execution of a Task, with a status lifecycle (pending → running → succeeded/failed), inputs, output, and timing. **Cron (via a Schedule), an Enqueue call, and a workflow step are the three triggers that each create a Run.** A Run is what the dashboard shows as a row, what Dispatch claims, and what lineage attaches to.
+_Avoid_: job, execution, task instance
+
+**Materialization Horizon**:
+How far ahead the scheduler pre-creates future Runs from Schedules (default 24h, configurable). Runs for the horizon window exist as rows in Postgres independent of the scheduler process, so they survive scheduler downtime. The horizon *is* the missed-detection durability window: Thrum can report what failed to run across a scheduler outage up to the horizon length. It is also the data backing forward simulation — the "next 24h" already exists as rows.
+_Avoid_: lookahead, window (be specific)
+
+**Fire Time**:
+The scheduled clock time of a cron occurrence, and the **logical identity** of a scheduled Run — "Tuesday's 02:00 run." `(schedule_id, fire_time)` is unique, which is what makes materialization idempotent (re-running the sweep `INSERT … ON CONFLICT DO NOTHING` can never double-create an occurrence) and crash-safe across leader handoffs. It is also what Backfill references and what Missed-detection keys off. Not merely a timestamp column — the canonical identity of an occurrence.
+_Avoid_: scheduled_at (ambiguous with when the row was created), run time
+
+**Missed (Run state)**:
+A Run that was pre-materialized in `scheduled` state but whose fire time passed without it transitioning to `running` — detected by a reconciliation sweep. A first-class Run state, not a derived inference. This is the state that defeats crontab blindness.
+_Avoid_: skipped, dropped, lost
+
+**Expectation**:
+The snapshot of when a Run should start, finish, and how long it should take (`expected_start_at`, `expected_finish_by`, `expected_duration`), captured immutably onto the Run at materialization from its Schedule's policy — never read live. The basis for the derived states below and the SLO engine. Ad-hoc enqueued Runs have no timing Expectation (nullable).
+_Avoid_: SLA (the SLA is one facet — the deadline), target
+
+**Late / Overrun (derived flags, not lifecycle states)**:
+Derived from Expectation + actuals, computed as flags on a Run that is otherwise `running` or terminal — **not** values of the status column. The two flags live on two orthogonal SLO axes: **Late** is the *start* axis, **Overrun** is the *duration* axis. **Late**: started after `expected_start_at` + **Start Grace** (a property of *how* it started). **Overrun**: still running past `expected_finish_by` (+ **Duration Grace**, a future knob — Overrun is graceless today), or still running when the next Run is due (can be true *while* `running`). They are orthogonal axes to the lifecycle status, which is why they are flags, not states. `Missed`, by contrast, *is* a terminal lifecycle state. v1 surfaces only `Missed`; Late/Overrun populate silently.
+_Avoid_: delayed, slow, stuck; calling them "states"
+
+**Start Grace / Duration Grace (the two SLO-axis tolerances)**:
+Per-Schedule tolerances, snapshotted into a Run's Expectation. **Start Grace** (the field formerly called `lateness_grace`) is how tardy a Run's *start* may be before it is flagged **Late** — the start axis. **Duration Grace** is how far past `expected_finish_by` a Run may *run* before it is flagged **Overrun** — the duration axis; reserved name, not yet wired (Overrun is silent and graceless in v1). Both are *soft SLO* knobs feeding *derived flags* — neither drives a hard lifecycle transition. In particular, **Start Grace is NOT the Miss-detection Grace**: the latter is an internal operational floor that gates the hard `Missed` terminal, deliberately decoupled so tightening an SLO can never make miss-detection trigger-happy.
+_Avoid_: lateness_grace (renamed to Start Grace), conflating either with Miss-detection Grace
+
+**Miss-detection Grace**:
+An internal, operational tolerance — **not** a user SLO knob — that an unstarted `scheduled` Run must exceed past its Fire Time before the sweep declares it `Missed`. Floored at ≥ one sweep interval so ordinary scheduling jitter (a Run that is claimable-but-not-yet-claimed when a sweep fires) can never manufacture a false `Missed`. Distinct from **Start Grace** (a soft SLO tolerance feeding the Late flag); this one guards a hard terminal transition.
+_Avoid_: lateness grace, start grace, SLO grace (it is none of these — it is operational anti-jitter)
+
+**Attempt**:
+One try at executing a Run. A Run holds 1..N Attempts; a retry adds an Attempt to the *same* Run, it does not create a new Run. Each Attempt has its own start/end and a terminal **outcome** on two axes — **Task-attributable**: `succeeded`, `failed` (the Task raised), `timed_out` (the Task overran its hard timeout; see Timeout); **Worker-attributable**: `abandoned` (reaped as an orphan — its Worker died; see Reaper), `requeued` (released by clean drain on Worker shutdown — routine, not a failure). The outcome taxonomy is load-bearing for the dashboard: `failed`/`timed_out` are the Task's fault and spend the retry budget (ADR-0020), `abandoned` is alarming infrastructure failure, `requeued` is a normal deploy and spends nothing. The Run is the logical unit ("did Tuesday's receipts send?"); Attempts are the tries underneath it.
+_Avoid_: retry (a retry is the act that creates an Attempt), try
+
+**Effect**:
+An observed data mutation an Operation made through its injected `db` Capability, recorded by instrumenting the framework-constructed session. Because the framework builds and owns that session (the reversal of the drop-in "instrument the user's own engine" model — see ADR-0024), effects are attributable by construction; no contextvar attribution is needed. Effect rows are written into the **same transaction** as the Operation's own writes and its completion record, so the records that land commit atomically with the effects (no dual write). The recording mechanism is **best-effort and isolated** — strengthened, not relaxed, by sharing the Operation's transaction: a recording listener that raised could roll back real effects, so it must never abort that transaction. v1 records one Effect per `(table, kind)` (`insert`/`update`/`delete`) per **Attempt** with a row count — table-level aggregation, not per-row primary keys. Keys off the **Attempt**, not the Run: each Attempt commits its own transaction, so a failed Attempt's writes roll back and commit zero Effects, and the **Zero-Effect** check is a per-Attempt count. External capability *calls* (mailer/payment/LLM) are a separate concern (Outbox / step-recording), not Effects in v1.
+_Avoid_: lineage (the v2 cross-Run data-dependency graph; an Effect is one Run's observed mutation), side effect, write (be specific)
+
+**Zero-Effect (derived flag, not a status)**:
+The wedge signal: an Attempt whose Operation terminated `succeeded` but committed **zero Effects**. Surfaced as a **derived flag** in the same spirit as Late/Overrun — it never changes the Run's `status` (observability must not mutate lifecycle state). A legitimate no-op (idempotent re-run, a filter that correctly matched nothing) is a succeeded-with-zero-Effects Run, so the flag informs rather than fails. Opt-in *enforcement* (an Operation that declares it **must** write, failing if it didn't) is a later **postcondition** feature, not this flag.
+_Avoid_: no-op (informal), failure (it is not a failure), silent failure (that is the user-facing framing, not the state)
+
+**Timeout**:
+A hard per-Task runtime limit, enforced by the **executing Worker** (not the Reaper). Distinct from two neighbors: from **Overrun** (Timeout *acts* — ends the Attempt; Overrun passively *observes* an SLO breach and changes nothing) and from **Lease** (Lease is about *Worker* liveness; Timeout is about *Task* runtime — a healthy heartbeating Worker still enforces it). Enforcement is hard for `async def` (coroutine cancellation) and process-pool Tasks (kill the child process) but **soft for sync thread-pool Tasks** — a Python thread cannot be killed, so timeout abandons the Run but cannot interrupt already-running code (a reason to mark such Tasks `cpu_bound=True`).
+_Avoid_: deadline (the optional enqueue deadline is a separate concept), overrun, SLA
+
+**Backfill**:
+Creating a *new* Run for a past logical occurrence (e.g. "re-run last Tuesday's 9am Run"). A Backfill is a new Run, never a new Attempt of an existing one.
+_Avoid_: replay (replay is backward time-travel debugging — a distinct concept), rerun
+
+**Worker**:
+A standalone process the user runs (separate from their app) that loads their task code, claims due work from Postgres, and executes it. Execution is deliberately out-of-process from the app so app and job failures are independent.
+_Avoid_: runner, consumer, daemon (use Worker)
+
+**Enqueue**:
+The act of creating a Run from inside the user's app process, using the caller's own SQLAlchemy session, so the Run is committed atomically with the surrounding business write. Enqueue happens in-process; execution does not. As the queue projection of an Operation, the signature is `op.enqueue(session, **inputs)`: `session` is the caller's transactional handle (`.enqueue`'s own first argument), and `**inputs` are the Operation's **Data** params (validated against its input schema). **Seam (decided, mechanics deferred):** the enqueue `session` (caller's, used to INSERT the Run) and the execution `db` Capability (worker-injected, used to RUN the Operation) are the same type but different roles and must never be conflated — an Operation does **not** receive its `db` Capability at the enqueue call site, only at execution.
+_Avoid_: dispatch (dispatch is a distinct internal step — see below), publish, submit
+
+**Scheduler**:
+A *role*, not a process. The single Worker that wins a Postgres advisory lock additionally runs the scheduling loop — materializing future Runs from Schedules over the Materialization Horizon and running the reconciliation sweep that marks Runs `missed`. Other Workers are warm failover. There is no separate scheduler deployable (a `--scheduler-only` flag can dedicate one as an opt-in).
+_Avoid_: beat, cron daemon, scheduler process (it is not its own process)
+
+**Dispatch**:
+The engine-internal step of selecting due/ready work from Postgres and handing it to a Worker (via `SELECT … FOR UPDATE SKIP LOCKED`). Distinct from Enqueue (user-facing creation) — do not conflate the two.
+_Avoid_: using "dispatch" to mean enqueue
+
+**Queue controls** (v2):
+The semantic controls layered on the existing Enqueue/Dispatch machinery that turn "a pile of pending Runs" into a queue: **concurrency limits** (at most N Runs of a Task / in a queue running at once), **rate limiting** (no more than N starts per interval, for protecting third-party APIs), **priority** (a Run jumps ahead of others), and **named queues** (route Tasks to Worker pools). Note: the *ability to enqueue* is not a queue control — Enqueue and Dispatch ship in v1; queue controls are the v2 layer on top.
+_Avoid_: "queues" (ambiguous — Enqueue already exists; the v2 work is the controls), routing (one facet)
+
+**Lineage**:
+The data-dependency graph of which tables/models each Task reads and writes, observed at runtime through engine-level instrumentation of the executing session in the Worker — not static analysis, and not from stored code (Thrum stores Runs, never code). **Lineage lands wholly in v2** (collection + frequency profile + silent-failure + downstream-impact heads-up) — it is not built in v1; the v2 roadmap superseded the earlier "collected in v1" split in ADR-0018/0019. When it ships, **every cron Run is observed in full**; per-Run sampling is a later cost-valve for high-throughput queues only, because sampling would gut silent-failure detection on the cron wedge. Observation is **best-effort and isolated**: it can never fail the Run it watches. The basis for "this schedule change affects N downstream consumers" and silent-failure detection. Unique to Thrum's in-session position.
+_Avoid_: dependency graph (too generic), DAG (a DAG is a user-authored workflow — distinct)
+
+**Control Plane**:
+The single API (containerized FastAPI) through which humans and agents observe and command the system. The dashboard, the `--json` CLI, and the MCP server are all thin clients of it. The one chokepoint where validation, RBAC, and audit are enforced — and where the OSS/Pro line runs. Distinct from the **engine-coordination plane** (SDK/scheduler/Worker coordinating through the schema); do not conflate "Postgres is the protocol" (engine coordination) with how people/agents act on the system (Control Plane).
+_Avoid_: backend, server, API (be specific — it is the Control Plane)
+
+**Lease**:
+A time-bounded claim on a Run, held by the Worker executing it and recorded **on the current Attempt** (not the Run). The claim transaction inserts the Attempt stamped with `claimed_by`, `started_at`, and `lease_expires_at`; while it runs the Worker renews `lease_expires_at` (see Heartbeat). An open Attempt (`ended_at IS NULL`) whose lease has expired is presumed abandoned by a dead Worker and its Run is reclaimable. The lease is what makes claim-then-execute safe without holding a row lock for the whole execution.
+_Avoid_: lock (the row lock is the brief claim-transaction mechanism, distinct), visibility timeout (SQS term — we own the word Lease)
+
+**Heartbeat**:
+The periodic renewal of a running Run's `lease_expires_at` by its executing Worker, proving liveness. Stops when the Worker dies; the lapse is what the Reaper detects.
+_Avoid_: keepalive, ping
+
+**Reaper**:
+The reconciliation-sweep pass (run by the Scheduler role) that finds **open Attempts** (`ended_at IS NULL`) with an expired Lease — orphans of a dead Worker — closes each (`ended_at = now()`, `error = 'abandoned'`), and returns its parent Run to a claimable state (`pending`, or `failed` if the Attempt budget is exhausted). The same sweep that marks `missed`; orphan-detection and missed-detection are one query family.
+_Avoid_: janitor, sweeper (the sweep is the broader reconciliation pass; the Reaper is its orphan-recovery duty)
+
+## Flagged ambiguities
+
+- **"Job"** — banned as a primary term. It conflated three concepts now split into **Operation** (the code), **Schedule** (the recurring rule), and **Run** (a single execution). Use the precise term. "Background-jobs system" remains acceptable only as informal external marketing language, never in code or design.
+- **"Task"** — retired as a primary term (absorbed by **Operation**). Survives only as an internal value object the queue projection carries; never use it as authoring vocabulary or in user-facing API. The `Run.task_namespace`/`task_name` columns rename to `operation_namespace`/`operation_name` (free pre-release migration — done before the schema ships).

@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "Typed operations for durable Python applications."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "Apache-2.0"
+license = "MIT"
 authors = [
   { name = "Hunter Kuffel" }
 ]
@@ -22,7 +22,55 @@ classifiers = [
   "Typing :: Typed",
 ]
 
+# Base install = the durable-job slice (thrum.jobs): SDK + Worker + scheduler +
+# CLI. The import-discipline law: nothing reachable from `thrum.jobs.models`,
+# `thrum.jobs.registry`, `thrum.jobs.enqueue`, or `thrum.jobs.db` may import the
+# server stack (FastAPI) at module load. See docs/adr/0011-control-plane-api.md.
+dependencies = [
+  "sqlalchemy>=2.0",
+  "greenlet>=3",          # required by SQLAlchemy's async engine (ADR-0005)
+  "alembic>=1.13",
+  "croniter>=2.0",        # cron expansion on the Python side (Postgres does the tz conversion)
+  "click>=8.1",           # CLI
+  "psycopg[binary]>=3.1", # sync driver: migrations + CLI
+  "asyncpg>=0.29",        # async driver: the async-first Worker (ADR-0005)
+]
+
+[project.optional-dependencies]
+# The one heavy, don't-want-it-in-my-app dependency: the FastAPI control plane
+# + dashboard. Only the box running the dashboard needs it (ADR-0011).
+server = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+]
+
+[project.scripts]
+thrum = "thrum.jobs.cli:main"
+
+[dependency-groups]
+dev = [
+  "ruff>=0.4",
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "testcontainers[postgres]>=4", # real ephemeral Postgres in tests — mocking the DB tests nothing
+]
+
 [project.urls]
 Homepage = "https://github.com/hkuffel/thrum"
 Repository = "https://github.com/hkuffel/thrum"
 Issues = "https://github.com/hkuffel/thrum/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/thrum"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
