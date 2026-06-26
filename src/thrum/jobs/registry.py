@@ -300,7 +300,4 @@ def operation(
 
     Equivalent to ``@_default_registry.operation`` — the same fail-fast
     collision check applies."""
-
-    if fn is None:
-        return _default_registry.operation(**kwargs)
-    return _default_registry.operation(**kwargs)(fn)
+    return _default_registry.operation(fn, **kwargs)
