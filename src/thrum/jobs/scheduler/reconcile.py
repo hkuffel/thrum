@@ -20,9 +20,11 @@ async def assert_declared_schedules(
 ) -> int:
     """Persist the declared Schedule set into the `schedules` table.
 
-    Keyed on Task identity (task_namespace, task_name). INSERT … ON CONFLICT
-    DO UPDATE so a changed cron/tz/policy updates in place, a new identity
-    inserts, and a re-declared identity revives its declaration gate.
+    Keyed on Schedule identity (task_namespace, task_name, cron) so an
+    operation may declare several recurrences without them colliding. INSERT …
+    ON CONFLICT DO UPDATE so a changed tz/policy updates the matching
+    recurrence in place, a new recurrence inserts, and a re-declared one
+    revives its declaration gate.
 
     Writes only the declaration gate — never the operational gate (ADR-0022).
     Returns the number of rows upserted.
@@ -50,9 +52,9 @@ async def assert_declared_schedules(
 
     stmt = pg_insert(Schedule).values(rows)
     stmt = stmt.on_conflict_do_update(
-        constraint="uq_schedules_task",
+        constraint="uq_schedules_task_cron",
         set_={
-            "cron": stmt.excluded.cron,
+            # `cron` is part of the conflict key, so it never changes on update.
             "timezone": stmt.excluded.timezone,
             "declared_duration": stmt.excluded.declared_duration,
             "sla": stmt.excluded.sla,

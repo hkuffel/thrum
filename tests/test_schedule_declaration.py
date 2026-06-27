@@ -172,6 +172,21 @@ def test_multiple_schedules_all_registered_globally() -> None:
     assert len(Registry._global_schedules[key]) == 2
 
 
+def test_operation_remains_hashable_with_schedules() -> None:
+    reg = Registry("sched_test_hash")
+
+    @reg.operation
+    def hashable_op() -> None: ...
+
+    hashable_op.schedule("0 2 * * *", tz="UTC")
+    hashable_op.schedule("0 9 * * 1", tz="America/New_York")
+
+    # frozen dataclass carrying a mutable list must stay hashable (the list is
+    # excluded from eq/hash) so Operations can be used as dict keys / set members.
+    assert hash(hashable_op) is not None
+    assert hashable_op in {hashable_op}
+
+
 def test_validation_does_not_import_worker_or_server() -> None:
     import sys
 

@@ -125,7 +125,12 @@ class Operation(Generic[P, R]):
     retry_max_delay: float = 300.0
     retry_backoff_factor: float = 2.0
     retry_jitter: bool = True
-    declared_schedules: list[DeclaredSchedule] = field(default_factory=list, repr=False)
+    # Mutated in place by `.schedule()`. Excluded from eq/hash (compare=False)
+    # so the frozen dataclass stays hashable despite carrying a list — identity
+    # is `namespace.name`, not the schedule set.
+    declared_schedules: list[DeclaredSchedule] = field(
+        default_factory=list, repr=False, compare=False
+    )
 
     @property
     def key(self) -> str:

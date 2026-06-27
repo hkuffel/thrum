@@ -23,7 +23,14 @@ from thrum.jobs.models.base import Base
 class Schedule(Base):
     __tablename__ = "schedules"
     __table_args__ = (
-        UniqueConstraint("task_namespace", "task_name", name="uq_schedules_task"),
+        # Schedule identity is (task, cron): one operation may declare several
+        # recurrences (e.g. a nightly + a Monday-morning run), each a distinct
+        # row. Including `cron` lets the reconcile upsert update a re-declared
+        # recurrence in place while still inserting sibling schedules instead of
+        # collapsing them onto the last-declared one.
+        UniqueConstraint(
+            "task_namespace", "task_name", "cron", name="uq_schedules_task_cron"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
