@@ -18,7 +18,7 @@ Open a pull request for branch `{{BRANCH}}` against `{{SOURCE_BRANCH}}` with a c
 
 ## Detected PR description templates
 
-!`ls .github/pull_request_template.md .github/PULL_REQUEST_TEMPLATE.md .github/PULL_REQUEST_TEMPLATE/*.md 2>/dev/null`
+!`ls .github/pull_request_template.md .github/PULL_REQUEST_TEMPLATE.md .github/PULL_REQUEST_TEMPLATE/*.md 2>/dev/null || true`
 
 # PROCESS
 
