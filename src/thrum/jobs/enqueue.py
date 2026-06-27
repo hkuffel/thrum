@@ -36,10 +36,8 @@ def enqueue(
     non-durable projections (future HTTP) must leave it NULL."""
     key = task.key if isinstance(task, Task) else task
 
-    # The queue's serialization boundary: inputs land in the `inputs` JSONB
-    # column, so a non-serializable value (a live ORM object instead of an ID)
-    # must fail here with the contract error, not later as a cryptic encoder
-    # failure when the Run is written.
+    # The queue's input serialization boundary — inputs become the `inputs`
+    # JSONB column, so reject a non-serializable value here, not in the encoder.
     for input_name, value in inputs.items():
         ensure_serializable(value, owner=key, role=f"input {input_name!r}")
 
