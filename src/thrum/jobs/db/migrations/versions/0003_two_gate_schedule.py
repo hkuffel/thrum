@@ -57,7 +57,12 @@ def upgrade() -> None:
     if not _has_column(bind, "declaration_active"):
         op.add_column(
             "schedules",
-            sa.Column("declaration_active", sa.Boolean, server_default=sa.text("true"), nullable=False),
+            sa.Column(
+                "declaration_active",
+                sa.Boolean,
+                server_default=sa.text("true"),
+                nullable=False,
+            ),
             schema=SCHEMA,
         )
     if not _has_column(bind, "last_declared_at"):
@@ -96,6 +101,11 @@ def downgrade() -> None:
             sa.Column("paused", sa.Boolean, server_default=sa.text("false"), nullable=False),
             schema=SCHEMA,
         )
-    for col in ("operationally_paused_by", "operationally_paused_at", "last_declared_at", "declaration_active"):
+    for col in (
+        "operationally_paused_by",
+        "operationally_paused_at",
+        "last_declared_at",
+        "declaration_active",
+    ):
         if _has_column(bind, col):
             op.drop_column("schedules", col, schema=SCHEMA)

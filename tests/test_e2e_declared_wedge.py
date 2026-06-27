@@ -1,10 +1,10 @@
-"""End-to-end test (issue #7): the declared front door now feeds the wedge.
+"""End-to-end test: the declared front door now feeds the wedge.
 
 Declare a Task with a due `schedule` → Worker startup assert writes the Schedule
 row → the leader sweep materializes a `scheduled` Run → Claim flips it to
 `running` → Record terminates it `succeeded`. No hand-inserted SQL — every row
-along the path is written by the system, proving PRD 0005's declared front door
-drives the materialization machinery 0003 already built.
+along the path is written by the system, proving the declared front door drives
+the materialization machinery end to end.
 
 Skips gracefully without Docker via the `session_factory`/`migrated_dsn`
 fixtures.
@@ -53,7 +53,7 @@ async def test_e2e_declared_schedule_through_the_front_door(
 
     send_receipts.schedule("* * * * *", tz="UTC")
 
-    # --- Startup assert ----------------------------------------------------
+    # Startup assert
     # The Worker's startup reconcile is what writes the `schedules` row. Drive
     # it directly (no `Worker.run` loop) so the test stays deterministic.
     worker = Worker(WorkerConfig(dsn=migrated_dsn))
@@ -67,7 +67,7 @@ async def test_e2e_declared_schedule_through_the_front_door(
     assert row.declaration_active is True
     assert row.operationally_paused_at is None
 
-    # --- Leader sweep materializes ----------------------------------------
+    # Leader sweep materializes
     result = await Scheduler(SchedulerConfig(), session_factory).sweep()
     assert result.materialized > 0
     assert result.missed == 0
@@ -81,7 +81,7 @@ async def test_e2e_declared_schedule_through_the_front_door(
         earliest.fire_time = func.now() - dt.timedelta(seconds=1)
         target_id = earliest.id
 
-    # --- Claim → execute → record -----------------------------------------
+    # Claim → execute → record
     processed = await run_once(
         session_factory, "worker-e2e", 10, LEASE, tasks=Registry._global
     )

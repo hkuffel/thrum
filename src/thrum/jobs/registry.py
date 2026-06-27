@@ -1,11 +1,11 @@
-"""Operation, Task, and Registry (ADR-0023 / CONTEXT). A `Registry` declares a
+"""Operation, Task, and Registry (ADR-0023 / CONTEXT.md). A `Registry` declares a
 `namespace` once; an `@registry.operation` inherits that namespace, and a bare
 `@operation` falls into the process-shared `default` registry. Identity is
 `namespace.name`, user-owned and stable across refactors — never derived from
 import path. The process-global view fails fast on a `namespace.name` collision
 at decoration/import time so the misconfiguration cannot reach the Worker.
 
-The `Operation` is the *authoring surface* — what the developer writes and what
+The `Operation` is the authoring surface — what the developer writes and what
 `.enqueue(...)` projects onto the queue. `Task` survives as an internal value
 object (worker execution still talks Task-shape via duck-typed `.fn`/
 `.retry_policy`); user code does not author Tasks directly.
@@ -39,7 +39,7 @@ R = TypeVar("R")
 @dataclass(frozen=True)
 class DeclaredSchedule:
     """In-memory spec captured by the decorator — no I/O. Persisted to the
-    `schedules` table by the startup reconcile (a later slice)."""
+    `schedules` table by the startup reconcile."""
 
     cron: str
     timezone: str
@@ -54,7 +54,10 @@ def _validate_cron(expr: str) -> None:
 
 
 def _validate_timezone(tz: str) -> None:
-    if isinstance(tz, dt.timezone) or (isinstance(tz, str) and (tz.startswith("+") or tz.startswith("-"))):
+    is_fixed_offset = isinstance(tz, dt.timezone) or (
+        isinstance(tz, str) and (tz.startswith("+") or tz.startswith("-"))
+    )
+    if is_fixed_offset:
         raise ValueError(
             f"Fixed-offset timezone {tz!r} is not allowed; use an IANA name "
             f"like 'America/Vancouver' (ADR-0015)"
@@ -77,7 +80,7 @@ class Task:
     namespace: str
     name: str
     max_attempts: int = 1
-    timeout: float | None = None  # seconds; enforcement strength varies by context (ADR-0017)
+    timeout: float | None = None  # seconds; enforcement strength varies by context
     cpu_bound: bool = False        # opt into the process pool (ADR-0005)
 
     # Retry curve (ADR-0021). With max_attempts=1 these never fire, so the default
@@ -157,8 +160,8 @@ class Operation(Generic[P, R]):
     ) -> DeclaredSchedule:
         """Declare a recurring schedule co-located with this operation.
 
-        Validates ``cron`` and ``tz`` immediately (fail-fast at declaration time).
-        Records the ``DeclaredSchedule`` against this operation and into the
+        Validates `cron` and `tz` immediately (fail-fast at declaration time).
+        Records the `DeclaredSchedule` against this operation and into the
         process-global schedule registry for Worker startup reconcile."""
         _validate_cron(cron)
         _validate_timezone(tz)
@@ -178,13 +181,12 @@ class Operation(Generic[P, R]):
 
     def enqueue(self, session: Session, *, retries: int | None = None, **inputs: Any) -> Run:
         """Insert a `pending` Run on the caller's session. Validates `inputs`
-        against the operation's **input schema** (the data-only signature with
+        against the operation's input schema (the data-only signature with
         capability params stripped) so a missing or misspelled input — and a
         capability-named input — fails at the call, not later in the worker.
-        Does not commit — the caller commits inside their own transaction
-        (ADR-0001/0006).
+        Does not commit — the caller commits inside their own transaction.
 
-        Pass ``retries=N`` to override the operation's durability default for
+        Pass `retries=N` to override the operation's durability default for
         this one call only; omit it to inherit the operation's default. This
         override is stored on the Run (as max_attempts = N+1) so the Worker
         can read it at execution time. Non-durable projections (future HTTP)
@@ -231,12 +233,12 @@ class Registry:
         retry_jitter: bool = True,
     ) -> Any:
         """Register an Operation under this Registry's namespace. Identity is
-        ``namespace.name``; pass ``name=`` to override the function name for
+        `namespace.name`; pass `name=` to override the function name for
         the rare case where it isn't the identity you want. A duplicate
-        ``namespace.name`` (against any other Registry in the process, or
-        against the default registry) raises ``ValueError`` immediately.
+        `namespace.name` (against any other Registry in the process, or
+        against the default registry) raises `ValueError` immediately.
 
-        Declare recurring schedules via ``op.schedule(cron, tz=...)`` after
+        Declare recurring schedules via `op.schedule(cron, tz=...)` after
         decoration — schedules are co-located with the operation definition and
         validated (cron expression + IANA timezone) at declaration time."""
 
@@ -298,11 +300,11 @@ def operation(
     fn: Callable[P, R] | None = None,
     **kwargs: Any,
 ) -> Operation[P, R] | Callable[[Callable[P, R]], Operation[P, R]]:
-    """Mark a function as a Thrum Operation. A bare ``@operation`` falls into
-    the ``default`` namespace via the process-shared default Registry —
-    identity is ``namespace.name``, user-owned and stable across refactors.
-    Pass ``name=`` to override the function name as the identity.
+    """Mark a function as a Thrum Operation. A bare `@operation` falls into
+    the `default` namespace via the process-shared default Registry —
+    identity is `namespace.name`, user-owned and stable across refactors.
+    Pass `name=` to override the function name as the identity.
 
-    Equivalent to ``@_default_registry.operation`` — the same fail-fast
+    Equivalent to `@_default_registry.operation` — the same fail-fast
     collision check applies."""
     return _default_registry.operation(fn, **kwargs)

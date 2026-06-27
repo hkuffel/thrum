@@ -1,25 +1,23 @@
-"""Materialization (PRD 0003 / ADR-0003 / ADR-0015): the cron *wedge*.
+"""Materialization (ADR-0003 / ADR-0015): the cron wedge.
 
 On each leader sweep tick, expand every non-paused Schedule's cron over the
 Materialization Horizon and pre-create a `scheduled` Run per occurrence. Because
 those Runs are rows in Postgres independent of the leader's liveness, the next
 ~24h of work survives scheduler downtime — and an occurrence that should have
-fired but didn't becomes a *row in the wrong state* the sweep can mark `missed`,
+fired but didn't becomes a row in the wrong state the sweep can mark `missed`,
 not an absent row nobody notices (the crontab blindness Thrum sells against).
 
-Timezone discipline (ADR-0015): cron expansion runs in **Python on naive local
-wall-clock datetimes** (croniter never sees a timezone); the local→UTC
-`fire_time` resolution happens in **Postgres via `AT TIME ZONE`**, so Postgres's
-bundled `tzdata` is the single authority and there is no zoneinfo-vs-tzdata skew.
+Timezone discipline (ADR-0015): cron expansion runs in Python on naive local
+wall-clock datetimes (croniter never sees a timezone); the local→UTC `fire_time`
+resolution happens in Postgres via `AT TIME ZONE`, so Postgres's bundled `tzdata`
+is the single authority and there is no zoneinfo-vs-tzdata skew.
 
-DST policy, applied in `resolve_fire_times`:
-  - **Spring-forward** (local time does not exist): shift forward to the next
-    valid instant (02:30 → 03:00), so a "daily" job still runs that day. A
-    silently skipped day would look exactly like the missed-run failure we exist
-    to flag, so we shift rather than skip.
-  - **Fall-back** (local time occurs twice): fire **once**. croniter emits the
-    wall-clock once and `AT TIME ZONE` resolves it to a single instant — the
-    cardinal sin of double-firing cannot occur.
+DST policy, applied in `resolve_fire_times`. A spring-forward time (local time
+that does not exist) shifts forward to the next valid instant (02:30 → 03:00) so
+a daily job still runs that day; silently skipping it would look exactly like the
+missed-run failure Thrum exists to flag. A fall-back time (local time that occurs
+twice) fires once: croniter emits the wall-clock once and `AT TIME ZONE` resolves
+it to a single instant, so double-firing cannot occur.
 
 Idempotency (ADR-0003): insert is `INSERT … ON CONFLICT (schedule_id, fire_time)
 DO NOTHING`. Re-running the sweep — or a leader dying mid-materialize and another
@@ -102,11 +100,11 @@ async def resolve_fire_times(
 def _expectation(
     schedule: Schedule, fire_time: dt.datetime
 ) -> tuple[dt.datetime, dt.datetime | None, dt.timedelta | None]:
-    """Snapshot the Expectation (ADR-0010) for an occurrence from the Schedule's
-    policy: when it should start, finish, and how long it should take. Captured
-    immutably onto the Run so Late/Overrun stay derivable later from fixed
-    expectations (they remain silent in v1). The SLA *is* the deadline (CONTEXT),
-    so it drives `expected_finish_by`; absent an SLA, the declared duration does."""
+    """Snapshot the Expectation for an occurrence from the Schedule's policy: when
+    it should start, finish, and how long it should take. Captured immutably onto
+    the Run so Late/Overrun stay derivable later from fixed expectations (they
+    remain silent in v1). The SLA is the deadline (CONTEXT.md), so it drives
+    `expected_finish_by`; absent an SLA, the declared duration does."""
     expected_start_at = fire_time
     expected_duration = schedule.declared_duration
     if schedule.sla is not None:
@@ -123,9 +121,9 @@ async def materialize_schedules(session: AsyncSession, horizon: dt.timedelta) ->
     the number of *newly* created `scheduled` Runs (occurrences already present are
     absorbed by ON CONFLICT). Must run inside an open transaction.
 
-    The horizon window is computed from the Postgres clock (Q5 clock authority):
-    `(now(), now() + horizon]` in each Schedule's local wall-clock time, so cron
-    expansion and the dispatch `now()` comparisons share one clock."""
+    The horizon window is computed from the Postgres clock: `(now(), now() +
+    horizon]` in each Schedule's local wall-clock time, so cron expansion and the
+    dispatch `now()` comparisons share one clock."""
     db_now = (await session.execute(select(func.now()))).scalar_one()
     schedules = (
         (

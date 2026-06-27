@@ -1,11 +1,11 @@
-"""The Run: the central primitive (ADR-0002). The row mutates as it loops
+"""The Run: the central primitive. The row mutates as it loops
 scheduled/pending -> running -> pending -> ... while immutable Attempts accrue.
 Per-try data lives on Attempt, never here.
 
-Claimability predicate (the dispatch query, ADR-0008 / core-loop Q2):
+Claimability predicate (the dispatch query, ADR-0008):
     (status = 'pending'   AND next_attempt_at <= now())   -- enqueues + retries
     OR (status = 'scheduled' AND fire_time      <= now())  -- cron occurrences
-All time comparisons evaluate DB-side against Postgres now() (Q5 clock authority).
+All time comparisons evaluate DB-side against Postgres now().
 """
 
 from __future__ import annotations
@@ -43,8 +43,8 @@ class Run(Base):
     schedule_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("schedules.id"), nullable=True
     )
-    # NOTE (ADR-0012): a nullable workflow_run_id FK is a trivial additive v2
-    # migration with zero backfill — deliberately omitted now, not foreclosed.
+    # A nullable workflow_run_id FK is a trivial additive v2 migration with zero
+    # backfill — deliberately omitted now, not foreclosed.
 
     operation_namespace: Mapped[str] = mapped_column(String(255))
     operation_name: Mapped[str] = mapped_column(String(255))
@@ -58,7 +58,7 @@ class Run(Base):
         DateTime(timezone=True), nullable=True
     )
 
-    inputs: Mapped[dict] = mapped_column(JSONB, default=dict)  # ADR-0006: jsonb, IDs not objects
+    inputs: Mapped[dict] = mapped_column(JSONB, default=dict)  # jsonb; store IDs, not objects
     output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Per-call retries override: NULL means inherit from the Operation's default.
@@ -67,8 +67,8 @@ class Run(Base):
     # projections (HTTP) must not set it.
     max_attempts: Mapped[int | None] = mapped_column(nullable=True)
 
-    # Expectation snapshot — captured immutably at materialization (ADR-0010).
-    # late/overrun are DERIVED from these + Attempt actuals, not stored as status.
+    # Expectation snapshot — captured immutably at materialization. late/overrun are
+    # derived from these + Attempt actuals, not stored as status.
     expected_start_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -77,7 +77,7 @@ class Run(Base):
     )
     expected_duration: Mapped[dt.timedelta | None] = mapped_column(Interval, nullable=True)
 
-    # Best-effort version-aware dispatch seam (ADR-0002 context / ADR-0009).
+    # Best-effort version-aware dispatch seam.
     created_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[dt.datetime] = mapped_column(

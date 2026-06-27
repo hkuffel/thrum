@@ -1,7 +1,7 @@
-"""The Schedule: a recurring rule that creates Runs (CONTEXT). Stores the
-durable *intent* as cron + IANA timezone — never precomputed far-future UTC
-(ADR-0015). Declares the expectation *policy* that materialization snapshots
-onto each Run (ADR-0010).
+"""The Schedule: a recurring rule that creates Runs (CONTEXT.md). Stores the
+durable intent as cron + IANA timezone — never precomputed far-future UTC
+(ADR-0015). Declares the expectation policy that materialization snapshots
+onto each Run.
 
 Two-gate pause model (ADR-0022): a Schedule materializes only when both gates
 are active. The declaration gate is code-owned (written by reconcile); the
@@ -43,12 +43,12 @@ class Schedule(Base):
     cron: Mapped[str] = mapped_column(String(255))
     timezone: Mapped[str] = mapped_column(String(64))  # IANA name, e.g. "America/Vancouver"
 
-    # Expectation policy — snapshotted onto each materialized Run (ADR-0010).
+    # Expectation policy — snapshotted onto each materialized Run.
     declared_duration: Mapped[dt.timedelta | None] = mapped_column(Interval, nullable=True)
     sla: Mapped[dt.timedelta | None] = mapped_column(Interval, nullable=True)
     start_grace: Mapped[dt.timedelta | None] = mapped_column(Interval, nullable=True)
 
-    # --- Two-gate pause model (ADR-0022) ---
+    # Two-gate pause model (ADR-0022).
     # Declaration gate: code-owned, written by reconcile only.
     declaration_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_declared_at: Mapped[dt.datetime | None] = mapped_column(

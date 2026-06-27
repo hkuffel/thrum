@@ -1,4 +1,4 @@
-"""Retry + backoff tests (PRD 0004).
+"""Retry + backoff tests.
 
 The backoff curve is pure (no DB, no clock) and tested directly here with a fixed
 rng so jitter is deterministic. The budget decision is proven against real
@@ -48,8 +48,7 @@ async def _fail(session_factory, item, task):
         )
 
 
-# --- The pure curve (no DB) ------------------------------------------------
-
+# The pure curve (no DB)
 
 def test_backoff_no_jitter_is_capped_exponential():
     policy = RetryPolicy(initial_delay=1.0, backoff_factor=2.0, max_delay=300.0, jitter=False)
@@ -89,8 +88,7 @@ def test_retry_policy_defaults_are_the_beachhead():
     assert (p.initial_delay, p.max_delay, p.backoff_factor, p.jitter) == (1.0, 300.0, 2.0, True)
 
 
-# --- The budget decision in Record (real DB) -------------------------------
-
+# The budget decision in Record (real DB)
 
 async def test_failure_with_budget_remaining_requeues_with_backoff(session_factory):
     """A failing Task with budget left returns to `pending` with a future
@@ -211,8 +209,7 @@ async def test_unresolved_task_is_terminal_not_retried(session_factory):
         assert run.next_attempt_at is None
 
 
-# --- End-to-end through run_once (real DB) ---------------------------------
-
+# End-to-end through run_once (real DB)
 
 def _flaky_task(fails: int) -> Task:
     """A Task that raises its first `fails` invocations, then returns. Backoff is

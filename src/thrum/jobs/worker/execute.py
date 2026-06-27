@@ -1,18 +1,15 @@
 """Execute: resolve a claimed Run's Task and run its code.
 
 Pure with respect to the database — it takes a ClaimedRun and a task lookup,
-invokes the user's `fn`, and returns a structured outcome. Async context only
-this slice (ADR-0005's thread-pool / process-pool routing is out of scope).
+invokes the user's `fn`, and returns a structured outcome. Async context only for
+now; ADR-0005's thread-pool / process-pool routing is out of scope.
 
-PORT SEAM (net-new, deferred — see docs/VISION.md lines 220-226, 242):
-This pure, out-of-transaction execution is the insertion point for thrum's
-single-transaction, injected-session model. The target replaces this step so the
-operation runs *inside* one framework-owned transaction with a framework-
-constructed, instrumented SQLAlchemy session capability; effect-recording and the
-completion `record` then commit atomically with the operation's own DB effects,
-making "succeeded but produced zero effects" detectable. The port keeps this pure
-version working as-is; building the injected-session execution is the user's next
-step, not part of the port.
+This pure, out-of-transaction execution is the seam for the single-transaction
+injected-session model (ADR-0024): that model replaces this step so the operation
+runs inside one framework-owned transaction with an instrumented SQLAlchemy
+session, and effect-recording plus the completion `record` then commit atomically
+with the operation's own DB effects, making "succeeded but produced zero effects"
+detectable. Not yet implemented; this pure version is the current behavior.
 """
 
 from __future__ import annotations
@@ -31,7 +28,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ExecutionResult:
-    outcome: AttemptOutcome  # succeeded | failed (this slice)
+    outcome: AttemptOutcome  # succeeded or failed
     output: dict | None
     error: str | None  # traceback on failure
 
@@ -59,6 +56,6 @@ async def execute_run(claimed: ClaimedRun, tasks: dict[str, Task]) -> ExecutionR
             error=traceback.format_exc(),
         )
 
-    # JSONB output column holds a dict; richer return-value capture is later work.
+    # The JSONB output column holds a dict; non-dict returns are dropped for now.
     output = result if isinstance(result, dict) else None
     return ExecutionResult(outcome=AttemptOutcome.succeeded, output=output, error=None)

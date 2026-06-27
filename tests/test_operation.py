@@ -1,4 +1,4 @@
-"""Unit tests for the @operation authoring contract (ADR-0023, PRD-0001).
+"""Unit tests for the @operation authoring contract (ADR-0023).
 
 The keystone slice: a bare `@operation` resolves to identity `default.<fn_name>`,
 captures the function signature, and exposes `op.enqueue(session, **inputs)`
@@ -7,10 +7,9 @@ rather than later in the worker). The integration counterpart (writing a
 `pending` Run row to Postgres) lives next to the other ephemeral-Postgres tests
 and skips when Docker is unavailable.
 
-Issue #4 grows this with the named-`Registry` story: `@registry.operation`
-inherits the registry's namespace, `name=` overrides the derived name, and a
-duplicate `namespace.name` raises immediately so the misconfiguration cannot
-reach the Worker.
+The named-`Registry` story: `@registry.operation` inherits the registry's
+namespace, `name=` overrides the derived name, and a duplicate `namespace.name`
+raises immediately so the misconfiguration cannot reach the Worker.
 """
 
 from __future__ import annotations
@@ -94,7 +93,7 @@ def test_op_enqueue_rejects_misspelled_input() -> None:
         send_receipts.enqueue(session=None, invioce_id=1)
 
 
-# --- Named Registry (issue #4) --------------------------------------------
+# Named Registry
 
 
 def test_registry_operation_inherits_namespace() -> None:
@@ -185,7 +184,7 @@ def test_bare_operation_collision_against_named_default_registry() -> None:
         def foo() -> None: ...  # noqa: F811
 
 
-# --- Execution-nature + durability config (issue #6) ----------------------
+# Execution-nature + durability config
 
 
 def test_operation_decorator_accepts_retries_param() -> None:

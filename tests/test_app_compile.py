@@ -1,5 +1,5 @@
 """Unit tests for the App object and the `app.compile()` finalizer
-(issue #8, PRD-0001 / ADR-0023).
+(ADR-0023).
 
 `App` is the projection host, distinct from `Registry`: it owns operation
 discovery and the phase-two validation finalizer. `compile()` resolves each
@@ -38,8 +38,7 @@ def _app_with_db() -> App:
     return app
 
 
-# --- App is distinct from Registry, owns discovery -------------------------
-
+# App is distinct from Registry, owns discovery
 
 def test_app_discovers_global_operations() -> None:
     @operation
@@ -63,8 +62,7 @@ def test_app_scoped_to_a_registry_sees_only_its_operations() -> None:
     assert set(app.operations) == {"billing.charge"}
 
 
-# --- a clean operation compiles -------------------------------------------
-
+# a clean operation compiles
 
 def test_compile_passes_clean_operation() -> None:
     @operation
@@ -85,8 +83,7 @@ def test_compile_resolves_capability_against_registered_type() -> None:
     _app_with_db().compile()  # no raise
 
 
-# --- fail-fast: positional capability --------------------------------------
-
+# fail-fast: positional capability
 
 def test_compile_fails_on_positional_capability() -> None:
     @operation
@@ -96,8 +93,7 @@ def test_compile_fails_on_positional_capability() -> None:
         _app_with_db().compile()
 
 
-# --- fail-fast: unresolved injectable --------------------------------------
-
+# fail-fast: unresolved injectable
 
 def test_compile_fails_on_unresolved_injectable() -> None:
     """A keyword-only param with no default whose type is registered nowhere:
@@ -120,8 +116,7 @@ def test_trap_keyword_only_optional_data_is_not_an_unresolved_injectable() -> No
     _app_with_db().compile()  # no raise
 
 
-# --- fail-fast: non-serializable data / output -----------------------------
-
+# fail-fast: non-serializable data / output
 
 def test_compile_fails_on_non_serializable_data() -> None:
     @operation
@@ -146,8 +141,7 @@ def test_compile_accepts_newtype_and_container_data() -> None:
     _app_with_db().compile()  # no raise
 
 
-# --- aggregation ------------------------------------------------------------
-
+# aggregation
 
 def test_compile_aggregates_all_problems() -> None:
     @operation
@@ -158,8 +152,7 @@ def test_compile_aggregates_all_problems() -> None:
     assert len(exc.value.problems) == 3
 
 
-# --- idempotency ------------------------------------------------------------
-
+# idempotency
 
 def test_compile_is_idempotent() -> None:
     @operation

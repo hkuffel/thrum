@@ -1,4 +1,4 @@
-"""schedules unique key: (task_namespace, task_name) -> (.., cron) (issue #7)
+"""schedules unique key: (task_namespace, task_name) -> (.., cron)
 
 A single operation may now declare several recurrences via repeated
 `op.schedule(...)` calls. The old `uq_schedules_task` constraint allowed only

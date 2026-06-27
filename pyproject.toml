@@ -25,7 +25,7 @@ classifiers = [
 # Base install = the durable-job slice (thrum.jobs): SDK + Worker + scheduler +
 # CLI. The import-discipline law: nothing reachable from `thrum.jobs.models`,
 # `thrum.jobs.registry`, `thrum.jobs.enqueue`, or `thrum.jobs.db` may import the
-# server stack (FastAPI) at module load. See docs/adr/0011-control-plane-api.md.
+# server stack (FastAPI) at module load.
 dependencies = [
   "sqlalchemy>=2.0",
   "greenlet>=3",          # required by SQLAlchemy's async engine (ADR-0005)
@@ -38,7 +38,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # The one heavy, don't-want-it-in-my-app dependency: the FastAPI control plane
-# + dashboard. Only the box running the dashboard needs it (ADR-0011).
+# + dashboard. Only the box running the dashboard needs it.
 server = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",

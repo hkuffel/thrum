@@ -1,31 +1,25 @@
-"""App — the projection host and phase-two validation finalizer (ADR-0023 /
-PRD-0001).
+"""App — the projection host and phase-two validation finalizer (ADR-0023).
 
-`App` is distinct from `Registry`: a Registry owns *identity* (it declares the
-namespace Operations are authored under); the App owns *transports* and, in
-this slice, *finalization*. Naming and reaching stay separate as more
-transports arrive.
+`App` is distinct from `Registry`: a Registry owns identity (it declares the
+namespace Operations are authored under); the App owns transports and
+finalization. Naming and reaching stay separate as more transports arrive.
 
 `app.compile()` is the second phase of two-phase validation. Phase one runs at
 decoration (import time): capture the signature, register identity, fail-fast
 on collision and cron/tz rules. Phase two can only run once the capability
 registry is populated, so it is deferred to startup. Compile resolves each
 Operation's capabilities against the registered capability types and fails fast
-on the residual checks:
+on three residual checks. A capability-typed param placed positionally is a
+structural error, since keyword-only is necessary for injection. A keyword-only
+param with no default whose type matches no registered capability looks
+injectable but nothing can supply it — an optional Data flag must carry a
+default (the `since: date | None = None` trap). Non-serializable Data or output
+fails because every transport crosses a serialization boundary.
 
-- a capability-typed param placed **positionally** (keyword-only is necessary
-  for injection — a positional one is a structural error);
-- a keyword-only param with **no default** whose type matches **no registered
-  capability** (it looks injectable but nothing can supply it — an optional
-  Data flag must carry a default, the `since: date | None = None` trap);
-- **non-serializable** Data or output (every transport crosses a serialization
-  boundary, ADR-0006).
-
-Compile is **idempotent** — the in-memory validated registry is produced once;
-a later call (explicit or the implicit-on-first-start backstop) is a harmless
+Compile is idempotent — the in-memory validated registry is produced once; a
+later call (explicit or the implicit-on-first-start backstop) is a harmless
 no-op. It is exposed explicitly as `app.compile()` for tests and tooling, and
-`ensure_compiled()` is the seam first app/worker start invokes (the actual
-worker-boot wiring is the execution work's seam, out of scope here).
+`ensure_compiled()` is the seam first app/worker start invokes.
 
 SDK-core surface: stdlib only, no Worker/server imports (the import-discipline
 law).
@@ -175,9 +169,9 @@ _SERIALIZABLE_TYPES = (
 
 
 def _is_json_serializable(annotation: Any) -> bool:
-    """Best-effort serializability check — we only fail on *known* non-
-    serializable annotations (full static proof is not attempted, per ADR-0006).
-    Unannotated and unresolvable annotations pass."""
+    """Best-effort serializability check — only fail on known non-serializable
+    annotations; full static proof is not attempted. Unannotated and unresolvable
+    annotations pass."""
     if annotation is inspect.Signature.empty:
         return True
     if annotation is None or annotation is type(None):

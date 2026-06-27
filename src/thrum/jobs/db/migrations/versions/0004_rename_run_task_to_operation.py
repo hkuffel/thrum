@@ -1,11 +1,11 @@
 """rename runs.task_namespace/task_name -> operation_namespace/operation_name
 
-ADR-0023 / PRD-0001 retires "Task" from authoring vocabulary. The Run columns
-now speak the same language as the code (`@operation`) and docs. The 0001
-baseline is model-derived (`Base.metadata.create_all`), so a *fresh* database
-already gets the renamed columns directly from the models. This migration only
-fixes databases created *before* the rename: it is guarded to rename solely when
-the legacy `task_*` columns are still present, making it a no-op on fresh DBs.
+ADR-0023 retires "Task" from authoring vocabulary. The Run columns now speak the
+same language as the code (`@operation`) and docs. The 0001 baseline is
+model-derived (`Base.metadata.create_all`), so a fresh database already gets the
+renamed columns directly from the models. This migration only fixes databases
+created before the rename: it is guarded to rename solely when the legacy `task_*`
+columns are still present, making it a no-op on fresh DBs.
 
 Pre-release rename, no semantic change — no production data yet.
 

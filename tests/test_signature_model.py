@@ -1,17 +1,17 @@
-"""Unit tests for the signature model (issue #5, PRD-0001 / ADR-0023).
+"""Unit tests for the signature model (ADR-0023).
 
-A pure I/O-free deep module: given a function signature and the
-injected set of registered capability types, classify each parameter
-as required-data / optional-data / capability, derive the operation's
-input schema, and capture the output type.
+A pure I/O-free deep module: given a function signature and the injected set of
+registered capability types, classify each parameter as required-data /
+optional-data / capability, derive the operation's input schema, and capture the
+output type.
 
-The load-bearing rule under test: a parameter is a **Capability** iff
-it is **keyword-only AND its annotated type is a registered capability
-type** — both necessary. The trap case (``*, since: date | None =
-None`` of a non-capability type) is optional Data, never a Capability.
+The load-bearing rule under test: a parameter is a Capability iff it is
+keyword-only AND its annotated type is a registered capability type — both
+necessary. The trap case (`*, since: date | None = None` of a non-capability
+type) is optional Data, never a Capability.
 
-Tests drive the classifier directly with a fake capability-type
-registry; no Postgres, no decorator, no worker.
+Tests drive the classifier directly with a fake capability-type registry; no
+Postgres, no decorator, no worker.
 """
 
 from __future__ import annotations
@@ -36,8 +36,7 @@ class FakeMailer:
     """A second registered capability type, for multi-cap signatures."""
 
 
-# --- core classification ---------------------------------------------------
-
+# core classification
 
 def test_positional_param_is_required_data() -> None:
     def fn(invoice_id: int) -> None: ...
@@ -99,11 +98,10 @@ def test_multiple_capabilities_each_classified() -> None:
     ]
 
 
-# --- the trap case ---------------------------------------------------------
-
+# the trap case
 
 def test_trap_keyword_only_optional_non_capability_is_optional_data() -> None:
-    """The load-bearing rule: ``*, since: date | None = None`` is
+    """The load-bearing rule: `*, since: date | None = None` is
     optional Data, NEVER a Capability — its keyword-only-with-default
     shape mimics an injectable, and only the type-membership check
     guards against the misread."""
@@ -121,10 +119,9 @@ def test_trap_keyword_only_optional_non_capability_is_optional_data() -> None:
 
 
 def test_positional_of_capability_type_is_not_a_capability() -> None:
-    """A capability-typed param placed positionally is NOT a
-    Capability — keyword-only is a necessary condition. (Compile, a
-    later slice, can fail this as a structural error; the signature
-    module only classifies.)"""
+    """A capability-typed param placed positionally is NOT a Capability —
+    keyword-only is a necessary condition. Compile fails this as a structural
+    error; the signature module only classifies."""
 
     def fn(db: FakeSession) -> None: ...
 
@@ -150,8 +147,7 @@ def test_empty_capability_registry_makes_every_kwonly_optional_data() -> None:
     ]
 
 
-# --- realistic mixed signature --------------------------------------------
-
+# realistic mixed signature
 
 def test_mixed_signature_classifies_all_three_kinds() -> None:
     def send_receipts(
@@ -203,8 +199,7 @@ def test_classification_matrix(fn, capability_types, expected) -> None:
     assert [(p.name, p.kind) for p in model.parameters] == expected
 
 
-# --- input schema ----------------------------------------------------------
-
+# input schema
 
 def test_input_schema_excludes_capability_params() -> None:
     """The input schema is the data-only signature — capability params
@@ -259,8 +254,7 @@ def test_input_schema_bind_rejects_capability_named_input() -> None:
         schema.bind(db=FakeSession())
 
 
-# --- output type -----------------------------------------------------------
-
+# output type
 
 def test_output_type_captured() -> None:
     def fn() -> dict: ...
@@ -278,8 +272,7 @@ def test_output_type_empty_when_no_annotation() -> None:
     assert model.output_type is inspect.Signature.empty
 
 
-# --- accepts a Signature directly -----------------------------------------
-
+# accepts a Signature directly
 
 def test_classify_accepts_a_raw_signature() -> None:
     """Pure module — accepts either a callable or a Signature directly,

@@ -1,6 +1,6 @@
-"""The Attempt: one try at executing a Run (ADR-0002). Append-only — the
-immutable per-try ledger. The Lease lives HERE, not on the Run (core-loop Q2 /
-ADR-0013): an orphan is just an open Attempt with an expired lease."""
+"""The Attempt: one try at executing a Run. Append-only — the immutable per-try
+ledger. The lease lives on the Attempt, not the Run (ADR-0013): an orphan is just
+an open Attempt with an expired lease."""
 
 from __future__ import annotations
 

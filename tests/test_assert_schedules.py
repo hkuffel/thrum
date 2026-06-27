@@ -4,8 +4,7 @@ import asyncio
 import datetime as dt
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from thrum.jobs.models import Schedule
@@ -145,7 +144,7 @@ async def test_operational_pause_preserved_after_assert(session_factory):
     # simulate v2 operational pause
     async with session_factory() as s, s.begin():
         row = await _get_schedule(s, "ns", "paused")
-        row.operationally_paused_at = dt.datetime.now(dt.timezone.utc)
+        row.operationally_paused_at = dt.datetime.now(dt.UTC)
         row.operationally_paused_by = "ops-dashboard"
 
     async with session_factory() as s, s.begin():

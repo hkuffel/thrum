@@ -1,4 +1,4 @@
-"""runs.max_attempts: per-call durability override (issue #6)
+"""runs.max_attempts: per-call durability override
 
 Adds a nullable `max_attempts` integer column to `runs`. NULL means the Worker
 inherits the Operation's default retry policy; a non-null value carries the

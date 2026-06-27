@@ -1,4 +1,4 @@
-"""Unit tests for op.schedule(cron, tz=...) declaration (issue #7).
+"""Unit tests for op.schedule(cron, tz=...) declaration.
 
 No Postgres required — these test SDK-core validation that fires at
 import/declaration time."""
@@ -9,7 +9,7 @@ import datetime as dt
 
 import pytest
 
-from thrum.jobs.registry import DeclaredSchedule, Registry
+from thrum.jobs.registry import Registry
 
 
 @pytest.fixture(autouse=True)

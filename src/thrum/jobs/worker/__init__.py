@@ -1,26 +1,20 @@
-"""The Worker (CONTEXT): a standalone process that loads the user's Task code,
-claims due Runs from Postgres, and executes them out-of-process from the app
-(ADR-0001). One asyncio event loop (ADR-0005).
+"""The Worker (CONTEXT.md): a standalone process that loads the user's Task code,
+claims due Runs from Postgres, and executes them out-of-process from the app. One
+asyncio event loop (ADR-0005).
 
-This slice (0002) adds the lease-recovery substrate on top of 0001's enqueue →
-claim → execute → record path:
+Around the enqueue → claim → execute → record path it runs the lease-recovery
+substrate: a per-Worker Heartbeat coroutine renewing every open Attempt's lease on
+a dedicated connection (ADR-0013); leader election, where each Worker contends for
+a session-scoped advisory lock on its own connection (ADR-0007); and the
+leader-gated sweep, where the winner materializes the horizon, marks missed
+occurrences, and reaps orphaned Attempts (ADR-0013/0020). Claim handles both the
+`pending` and `scheduled` arms, so cron work flows end to end. A Task-attributable
+failure does not fail terminally on the first raise: Record returns the Run to
+`pending` with a backed-off `next_attempt_at` until its Attempt budget is spent
+(ADR-0020/0021).
 
-  - the **Heartbeat** — one per-Worker coroutine renewing every open Attempt's
-    lease on a dedicated connection (ADR-0013);
-  - **leader election** — each Worker contends for a session-scoped advisory lock
-    on its own dedicated connection (ADR-0007);
-  - the **leader-gated sweep** — the winner reaps orphaned Attempts (ADR-0013/0020).
-
-As of 0003 the leader-gated sweep also materializes the horizon and marks missed
-occurrences, and Claim handles the `scheduled` arm — so cron work flows end to end.
-
-As of 0004 a Task-attributable failure no longer fails terminally on the first
-raise: Record retries the Run (back to `pending` with a backed-off
-`next_attempt_at`) until its Attempt budget is spent (ADR-0020/0021).
-
-Still deliberately not here (each a later slice): thread/process-pool execution
-contexts (and hardening the heartbeat against loop-starvation), graceful drain
-(`requeued`), and lineage.
+Not yet implemented: thread/process-pool execution contexts (and hardening the
+heartbeat against loop-starvation), graceful drain (`requeued`), and lineage.
 """
 
 from __future__ import annotations
@@ -59,11 +53,10 @@ async def run_once(
     result is then recorded in its own transaction. The testable seam beneath
     `Worker.run`.
 
-    PORT SEAM (deferred): this three-transaction shape (claim | execute | record)
-    is where thrum's single-transaction, injected-session execution lands — see
-    the note in `worker/execute.py`. The future model collapses execute + effect-
-    recording + record into one transaction with a framework-built session
-    capability. Left as-is by the port.
+    This three-transaction shape (claim | execute | record) is the seam for the
+    single-transaction injected-session execution model (ADR-0024), which
+    collapses execute + effect-recording + record into one transaction with a
+    framework-built session. See `worker/execute.py`. Not yet implemented.
     """
     if tasks is None:
         tasks = Registry._global
@@ -161,10 +154,10 @@ class Worker:
 
     async def _sweep_loop(self, leader_engine, session_factory: async_sessionmaker) -> None:
         """Contend for the sweep lock each tick; while held, run the reconciliation
-        sweep (materialize + mark missed + reap). The advisory-lock connection is held open for the
-        whole loop, so on this Worker's death Postgres releases the lock and the
-        next Worker wins (ADR-0007). AUTOCOMMIT keeps that connection out of an
-        idle-in-transaction state between `try`s."""
+        sweep (materialize + mark missed + reap). The advisory-lock connection is
+        held open for the whole loop, so on this Worker's death Postgres releases
+        the lock and the next Worker wins (ADR-0007). AUTOCOMMIT keeps that
+        connection out of an idle-in-transaction state between `try`s."""
         from thrum.jobs.scheduler import Scheduler
         from thrum.jobs.scheduler.election import try_acquire_sweep_lock
 
@@ -195,9 +188,8 @@ class Worker:
             pass
 
     def request_drain(self) -> None:
-        """SIGTERM handler (ADR-0016): stop claiming and wake every loop. Full
-        graceful-drain semantics (requeue in-flight as `requeued`) land with a
-        later slice."""
+        """SIGTERM handler: stop claiming and wake every loop. Full graceful-drain
+        semantics (requeue in-flight as `requeued`) are not yet implemented."""
         self._draining = True
         if self._stop is not None:
             self._stop.set()

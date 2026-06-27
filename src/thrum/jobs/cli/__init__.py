@@ -1,5 +1,5 @@
-"""The `thrum` CLI. Subcommands import their heavy machinery LAZILY (inside the
-command body), so `thrum db upgrade` never loads the Worker and nothing here
+"""The `thrum` CLI. Subcommands import their heavy machinery lazily inside the
+command body, so `thrum db upgrade` never loads the Worker and nothing here
 drags in the `[server]` stack unless `thrum server` is actually invoked. This is
 the CLI half of the import-discipline law (pyproject.toml)."""
 

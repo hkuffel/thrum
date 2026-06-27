@@ -1,4 +1,4 @@
-"""Runtime configuration. Defaults are the simple-correct beachhead values (ADR-0009)."""
+"""Runtime configuration. Defaults are the simple-correct beachhead values."""
 
 from __future__ import annotations
 
@@ -18,11 +18,11 @@ class WorkerConfig:
     poll_interval: dt.timedelta = dt.timedelta(seconds=5)
 
     # Lease / heartbeat (ADR-0013). Heartbeat frequently relative to the TTL so a
-    # transient stall (GC pause, DB blip) does not trigger a false reap (ADR-0014).
+    # transient stall (GC pause, DB blip) does not trigger a false reap.
     lease_ttl: dt.timedelta = dt.timedelta(seconds=45)
     heartbeat_interval: dt.timedelta = dt.timedelta(seconds=10)
 
-    # Graceful drain (ADR-0016): align with the orchestrator's terminationGracePeriod.
+    # Graceful drain: align with the orchestrator's terminationGracePeriod.
     drain_grace: dt.timedelta = dt.timedelta(seconds=30)
 
     # Whether this Worker may contend for the scheduler advisory lock (ADR-0007).
@@ -38,10 +38,10 @@ class SchedulerConfig:
     # Cadence of the reconciliation sweep (materialize + mark missed + reap).
     sweep_interval: dt.timedelta = dt.timedelta(seconds=30)
 
-    # Miss-detection Grace (CONTEXT): an internal OPERATIONAL floor a `scheduled`
-    # Run must exceed past its fire_time before the sweep declares it `missed` —
-    # NOT the per-Schedule Start Grace SLO knob. Floored at ≥ one sweep interval
-    # (see `effective_miss_grace`) so scheduling jitter cannot manufacture a false
+    # Miss-detection Grace (CONTEXT.md): an internal operational floor a `scheduled`
+    # Run must exceed past its fire_time before the sweep declares it `missed`, not
+    # the per-Schedule Start Grace SLO knob. Floored at ≥ one sweep interval (see
+    # `effective_miss_grace`) so scheduling jitter cannot manufacture a false
     # `missed` on a hard terminal transition.
     miss_grace: dt.timedelta = dt.timedelta(seconds=60)
 

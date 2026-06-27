@@ -25,9 +25,9 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class RetryPolicy:
     """A Task's budget + backoff curve (ADR-0021). Defaults are the simple-correct
-    beachhead (ADR-0009): a 1→2→4→…→300s envelope with full jitter on. `max_attempts`
-    is the Attempt budget of Task-attributable tries (ADR-0020), not a backoff knob —
-    with the default of 1 the curve never fires, so single-attempt behavior is
+    beachhead: a 1→2→4→…→300s envelope with full jitter on. `max_attempts` is the
+    Attempt budget of Task-attributable tries (ADR-0020), not a backoff knob — with
+    the default of 1 the curve never fires, so single-attempt behavior is
     unchanged."""
 
     max_attempts: int = 1

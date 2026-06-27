@@ -1,7 +1,7 @@
-"""Leader election (ADR-0007): the Scheduler is a *role*, not a process. Every
+"""Leader election (ADR-0007): the Scheduler is a role, not a process. Every
 Worker opportunistically contends for a single session-scoped Postgres advisory
 lock on its own dedicated connection; the winner runs the reconciliation sweep
-(reap this slice; +missed +materialize in 0003) and the rest are warm failover.
+(reap, missed-detection, materialize) and the rest are warm failover.
 
 Session-scoped (`pg_try_advisory_lock`, not the `_xact_` variant) is the whole
 point: the lock is held for the connection's life, independent of transactions.

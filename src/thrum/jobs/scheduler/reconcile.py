@@ -1,3 +1,9 @@
+"""Schedule reconciliation (ADR-0022): converge the `schedules` table on what the
+live Worker fleet declares in code, and gate off declarations no Worker still
+asserts. Both functions touch only the declaration gate, never the operational
+gate, so an operator pause survives reconciliation.
+"""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -74,8 +80,8 @@ async def pause_stale_schedules(
     """Clear the declaration gate for Schedules no live Worker still declares.
 
     A Schedule is stale when last_declared_at < now() - stale_threshold AND
-    declaration_active is still True.  During rolling deploys old Workers keep
-    stamping last_declared_at, so a Schedule is only gated off once *no* Worker
+    declaration_active is still True. During rolling deploys old Workers keep
+    stamping last_declared_at, so a Schedule is only gated off once no Worker
     has declared it for the full threshold window.
 
     Writes only the declaration gate — never the operational gate (ADR-0022).

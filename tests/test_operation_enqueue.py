@@ -37,7 +37,7 @@ async def test_op_enqueue_writes_pending_run_with_renamed_columns(session_factor
 
 async def test_op_enqueue_does_not_commit(session_factory):
     """Rollback after `op.enqueue` must wipe the Run — confirming the caller
-    owns the transaction boundary (ADR-0001/0006)."""
+    owns the transaction boundary."""
 
     @operation
     def send_receipts(invoice_id):

@@ -1,32 +1,26 @@
-"""Signature model — the pure I/O-free deep module that classifies an
-Operation's parameters and derives its data contract (PRD-0001 /
-ADR-0023).
+"""Signature model — the pure I/O-free deep module that classifies an Operation's
+parameters and derives its data contract (ADR-0023).
 
-Given a function signature and the **injected** set of registered
-capability types, every parameter falls into one of three buckets:
+Given a function signature and the injected set of registered capability types,
+every parameter falls into one of three buckets. REQUIRED_DATA is positional
+(positional-only or positional-or-keyword): the required inputs every transport
+must carry. OPTIONAL_DATA is keyword-only with an annotated type not in the
+registered-capability set; this includes the trap case `*, since: date | None =
+None`, where keyword-only-with-default mimics an injectable and only the
+type-membership check guards the misread. CAPABILITY is keyword-only with an
+annotated type in the registered-capability set; both conditions are necessary,
+since a capability-typed positional param is required Data here (Compile fails it
+as a structural error).
 
-- ``REQUIRED_DATA`` — positional (positional-only or positional-or-
-  keyword). The required inputs every transport must carry.
-- ``OPTIONAL_DATA`` — keyword-only AND its annotated type is NOT in
-  the registered-capability set. Includes the trap case
-  ``*, since: date | None = None``: keyword-only-with-default mimics
-  an injectable, and only the type-membership check guards the misread.
-- ``CAPABILITY`` — keyword-only AND its annotated type IS in the
-  registered-capability set. Both conditions are necessary: a
-  capability-typed positional param is required Data here (Compile
-  fails it as a structural error in a later slice).
+The capability-type lookup is an injected dependency — this module only reads it;
+populating it is execution-side work. v1 callers pass an empty set, so every
+keyword-only param falls through to optional Data; the same code path tightens
+once Compile hands the real registry in.
 
-The capability-type lookup is an injected dependency — this module
-only *reads* it; *populating* it is execution-side work (PRD-0002).
-v1 callers pass an empty set, so every keyword-only param falls
-through to optional Data; the same code path tightens once Compile
-hands the real registry in.
-
-From the classification we derive the Operation's input schema (a
-data-only signature) and capture its output type. The input schema is
-what ``op.enqueue`` validates ``**inputs`` against — so missing /
-misspelled inputs and capability-named kwargs fail at the call, not
-later in the worker.
+From the classification we derive the Operation's input schema (a data-only
+signature) and capture its output type. The input schema is what `op.enqueue`
+validates `**inputs` against, so missing/misspelled inputs and capability-named
+kwargs fail at the call, not later in the worker.
 """
 
 from __future__ import annotations
@@ -66,16 +60,16 @@ class ClassifiedParam:
 @dataclass(frozen=True)
 class InputSchema:
     """The Operation's data contract — the original signature with
-    capability params stripped. ``bind(**inputs)`` is the validation
-    primitive ``op.enqueue`` calls."""
+    capability params stripped. `bind(**inputs)` is the validation
+    primitive `op.enqueue` calls."""
 
     signature: inspect.Signature
     required: tuple[str, ...]
     optional: tuple[str, ...]
 
     def bind(self, /, **inputs: Any) -> inspect.BoundArguments:
-        """Validate ``**inputs`` against the data-only signature.
-        Raises ``TypeError`` on missing required, unexpected kwarg,
+        """Validate `**inputs` against the data-only signature.
+        Raises `TypeError` on missing required, unexpected kwarg,
         etc. — Python's own argument-binding rules surface the right
         diagnostic without us re-inventing them."""
         return self.signature.bind(**inputs)
@@ -107,11 +101,11 @@ def classify(
     *,
     capability_types: Collection[type] = (),
 ) -> SignatureModel:
-    """Classify each parameter of ``fn`` and derive the input schema +
+    """Classify each parameter of `fn` and derive the input schema +
     output type. Pass either a callable (the common case) or an
-    already-introspected ``inspect.Signature``.
+    already-introspected `inspect.Signature`.
 
-    ``capability_types`` is the injected set of registered capability
+    `capability_types` is the injected set of registered capability
     types — populated by execution-side work. Pass an empty collection
     (the v1 default) and every keyword-only param falls through to
     optional Data.
@@ -122,11 +116,10 @@ def classify(
         return_hint: Any = sig.return_annotation
     else:
         sig = inspect.signature(fn)
-        # ``from __future__ import annotations`` (PEP 563) stringifies
-        # every annotation; resolve them so type-identity checks against
-        # the capability registry work. Unresolvable forward refs fall
-        # back to the raw annotation, and Compile (issue #8) can surface
-        # the mismatch with a clear error.
+        # `from __future__ import annotations` (PEP 563) stringifies every
+        # annotation; resolve them so type-identity checks against the capability
+        # registry work. Unresolvable forward refs fall back to the raw annotation,
+        # and Compile surfaces the mismatch with a clear error.
         try:
             resolved_hints = inspect.get_annotations(fn, eval_str=True)
         except Exception:
@@ -175,8 +168,7 @@ def _classify_param(
         if annotation in capability_types:
             return ParamKind.CAPABILITY
         return ParamKind.OPTIONAL_DATA
-    # Positional-only and positional-or-keyword are required data. *args /
-    # **kwargs are out of scope for v1 — they fall through here as
-    # required data; a later Compile slice (issue #8) can reject them
-    # with a structural error if needed.
+    # Positional-only and positional-or-keyword are required data. *args/**kwargs
+    # are out of scope for v1 — they fall through here as required data; Compile
+    # can reject them with a structural error if needed.
     return ParamKind.REQUIRED_DATA

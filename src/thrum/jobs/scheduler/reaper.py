@@ -1,17 +1,16 @@
-"""Reaper (CONTEXT / ADR-0013 / ADR-0020): the orphan-recovery duty of the
+"""Reaper (CONTEXT.md / ADR-0013 / ADR-0020): the orphan-recovery duty of the
 leader's reconciliation sweep.
 
-An orphan is an **open Attempt** (`ended_at IS NULL`) whose Lease has lapsed
+An orphan is an open Attempt (`ended_at IS NULL`) whose lease has lapsed
 (`lease_expires_at < now()`) — its Worker stopped heartbeating, presumed dead.
 The Reaper closes each such Attempt `abandoned` and returns its parent Run to a
-claimable state (`pending`, `next_attempt_at = now()`) **unconditionally**: a
-dead or rolling-deployed Worker is infrastructure failure, never the Task
-failing, so it must not burn a retry (ADR-0020). The Attempt budget counts only
-`failed`/`timed_out`, which the Reaper never produces — so this stays fully
-decoupled from the (later) retry/backoff slice, computing no budget.
+claimable state (`pending`, `next_attempt_at = now()`) unconditionally: a dead or
+rolling-deployed Worker is infrastructure failure, never the Task failing, so it
+must not burn a retry (ADR-0020). The Attempt budget counts only
+`failed`/`timed_out`, which the Reaper never produces, so it computes no budget.
 
-All clock comparisons evaluate DB-side against Postgres `now()` (Q5), so there is
-no Worker-wall-clock skew in deciding what is lapsed.
+All clock comparisons evaluate DB-side against Postgres `now()`, so there is no
+Worker-wall-clock skew in deciding what is lapsed.
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ async def reap_orphans(session: AsyncSession) -> int:
     Must run inside an open transaction.
 
     `SKIP LOCKED` makes the pass safe even if two leaders briefly overlap during a
-    handoff; in steady state exactly one leader runs it. A *live* Attempt — one a
+    handoff; in steady state exactly one leader runs it. A live Attempt — one a
     healthy Worker is still heartbeating — never matches the predicate, so it is
     left untouched (no false reap, modulo the accepted loop-starvation window in
     ADR-0013).
