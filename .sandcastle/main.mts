@@ -73,7 +73,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         const implement = await sandbox.run({
             name: "implementer",
             maxIterations: 100,
-            agent: sandcastle.claudeCode("claude-opus-4-7"),
+            agent: sandcastle.claudeCode("claude-sonnet-4-6"),
             promptFile: "./.sandcastle/implement-prompt.md",
         });
 
@@ -116,7 +116,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         await sandbox.run({
             name: "pr-author",
             maxIterations: 5,
-            agent: sandcastle.claudeCode("claude-opus-4-7"),
+            agent: sandcastle.claudeCode("claude-haiku-4-5"),
             promptFile: "./.sandcastle/pr-prompt.md",
             promptArgs: {
                 BRANCH: branch,
