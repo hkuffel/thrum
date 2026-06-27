@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from thrum.jobs.models import AttemptOutcome
+from thrum.jobs.serialization import SerializationContractError, ensure_serializable
 
 if TYPE_CHECKING:
     from thrum.jobs.registry import Task
@@ -58,4 +59,16 @@ async def execute_run(claimed: ClaimedRun, tasks: dict[str, Task]) -> ExecutionR
 
     # The JSONB output column holds a dict; non-dict returns are dropped for now.
     output = result if isinstance(result, dict) else None
+
+    # The completion serialization boundary: `Run.output` is JSONB, so a
+    # non-serializable output fails this Attempt with the contract error rather
+    # than aborting the recording transaction — a raise there would leave the
+    # Run unrecorded and the Reaper would retry the same bad output forever.
+    try:
+        ensure_serializable(output, owner=claimed.task_key, role="output")
+    except SerializationContractError as exc:
+        return ExecutionResult(
+            outcome=AttemptOutcome.failed, output=None, error=str(exc)
+        )
+
     return ExecutionResult(outcome=AttemptOutcome.succeeded, output=output, error=None)

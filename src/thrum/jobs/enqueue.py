@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from thrum.jobs.models import Run, RunStatus, Trigger
 from thrum.jobs.registry import Task
+from thrum.jobs.serialization import ensure_serializable
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -34,6 +35,12 @@ def enqueue(
     default at execution time. Only the queue projection (enqueue) sets this;
     non-durable projections (future HTTP) must leave it NULL."""
     key = task.key if isinstance(task, Task) else task
+
+    # The queue's input serialization boundary — inputs become the `inputs`
+    # JSONB column, so reject a non-serializable value here, not in the encoder.
+    for input_name, value in inputs.items():
+        ensure_serializable(value, owner=key, role=f"input {input_name!r}")
+
     namespace, _, name = key.rpartition(".")
     run = Run(
         operation_namespace=namespace,
