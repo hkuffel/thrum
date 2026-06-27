@@ -14,6 +14,7 @@ is **retired** as authoring vocabulary; the ``Task`` class survives only as
 an internal value object carrying execution config the Worker reads.
 """
 
+from thrum.jobs.app import App, CompileError
 from thrum.jobs.enqueue import enqueue
 from thrum.jobs.registry import (
     DeclaredSchedule,
@@ -24,6 +25,8 @@ from thrum.jobs.registry import (
 )
 
 __all__ = [
+    "App",
+    "CompileError",
     "DeclaredSchedule",
     "Operation",
     "Registry",

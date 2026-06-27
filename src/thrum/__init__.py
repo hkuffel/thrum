@@ -15,8 +15,9 @@ finalizer.
 
 from __future__ import annotations
 
+from thrum.jobs.app import App, CompileError
 from thrum.jobs.registry import Operation, Registry, operation
 
 __version__ = "0.0.2"
 
-__all__ = ["Operation", "Registry", "operation", "__version__"]
+__all__ = ["App", "CompileError", "Operation", "Registry", "operation", "__version__"]
