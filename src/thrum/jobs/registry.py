@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from croniter import croniter
 
 from thrum.jobs.retry import RetryPolicy
+from thrum.jobs.signature import SignatureModel, classify
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -116,6 +117,7 @@ class Operation(Generic[P, R]):
     namespace: str
     name: str
     signature: inspect.Signature = field(repr=False)
+    signature_model: SignatureModel = field(repr=False)
     max_attempts: int = 1
     timeout: float | None = None
     cpu_bound: bool = False
@@ -144,12 +146,15 @@ class Operation(Generic[P, R]):
 
     def enqueue(self, session: Session, **inputs: Any) -> Run:
         """Insert a `pending` Run on the caller's session. Validates `inputs`
-        against the operation's signature so a missing or misspelled input
-        fails at the call, not later in the worker. Does not commit — the
-        caller commits inside their own transaction (ADR-0001/0006)."""
-        # Trigger Python's own argument-binding rules so missing/extra/duplicate
-        # parameters surface as TypeError before any DB I/O.
-        self.signature.bind(**inputs)
+        against the operation's **input schema** (the data-only signature with
+        capability params stripped) so a missing or misspelled input — and a
+        capability-named input — fails at the call, not later in the worker.
+        Does not commit — the caller commits inside their own transaction
+        (ADR-0001/0006)."""
+        # Python's own argument-binding rules over the data-only signature
+        # surface the right diagnostic (missing required, unexpected kwarg)
+        # before any DB I/O.
+        self.signature_model.input_schema.bind(**inputs)
 
         from thrum.jobs.enqueue import enqueue as _enqueue
 
@@ -232,11 +237,19 @@ class Registry:
             if key in Registry._global:
                 raise ValueError(f"Operation identity collision on {key!r}")
 
+            sig = inspect.signature(func)
+            # The capability-type registry is populated by execution-side
+            # work (PRD-0002); until Compile lands, v1 classifies against
+            # an empty set, so every keyword-only param falls through to
+            # optional Data. The same code path tightens once Compile
+            # hands the real registry in.
+            sig_model = classify(func, capability_types=())
             op = Operation(
                 fn=func,
                 namespace=self.namespace,
                 name=op_name,
-                signature=inspect.signature(func),
+                signature=sig,
+                signature_model=sig_model,
                 max_attempts=max_attempts,
                 timeout=timeout,
                 cpu_bound=cpu_bound,
