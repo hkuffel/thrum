@@ -63,7 +63,19 @@ async def record_result(
         return
 
     # Task-attributable failure: retry while the budget allows (ADR-0020/0021).
-    policy = task.retry_policy if task is not None else _NO_RETRY
+    # Per-call override (run.max_attempts) takes precedence over the Task's
+    # default; NULL means inherit.
+    base_policy = task.retry_policy if task is not None else _NO_RETRY
+    if run.max_attempts is not None:
+        policy = RetryPolicy(
+            max_attempts=run.max_attempts,
+            initial_delay=base_policy.initial_delay,
+            max_delay=base_policy.max_delay,
+            backoff_factor=base_policy.backoff_factor,
+            jitter=base_policy.jitter,
+        )
+    else:
+        policy = base_policy
     await session.flush()  # make this Attempt's outcome visible to the budget count
     failures = (
         await session.execute(
