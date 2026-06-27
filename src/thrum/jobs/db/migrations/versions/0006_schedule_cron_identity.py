@@ -61,6 +61,19 @@ def downgrade() -> None:
     bind = op.get_bind()
     if _has_constraint(bind, NEW_NAME):
         op.drop_constraint(NEW_NAME, "schedules", schema=SCHEMA, type_="unique")
+    # The widened constraint may have allowed multiple cron rows per operation.
+    # The old (task_namespace, task_name) constraint cannot tolerate them, so
+    # collapse each operation to its earliest-inserted row before recreating it.
+    bind.execute(
+        sa.text(
+            f'DELETE FROM "{SCHEMA}".schedules '
+            "WHERE ctid NOT IN ("
+            "SELECT MIN(ctid) FROM "
+            f'"{SCHEMA}".schedules '
+            "GROUP BY task_namespace, task_name"
+            ")"
+        )
+    )
     if not _has_constraint(bind, OLD_NAME):
         op.create_unique_constraint(
             OLD_NAME,
