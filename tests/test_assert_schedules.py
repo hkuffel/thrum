@@ -32,7 +32,7 @@ async def _get_schedule(session: AsyncSession, ns: str, name: str) -> Schedule |
 
 @pytest.mark.asyncio
 async def test_new_schedule_inserts(session_factory):
-    declared = {"billing.send_invoices": _spec(cron="0 9 * * 1")}
+    declared = {"billing.send_invoices": [_spec(cron="0 9 * * 1")]}
 
     async with session_factory() as s, s.begin():
         count = await assert_declared_schedules(s, declared)
@@ -50,7 +50,7 @@ async def test_new_schedule_inserts(session_factory):
 
 @pytest.mark.asyncio
 async def test_idempotent_rerun_refreshes_last_declared_at(session_factory):
-    declared = {"ns.job": _spec()}
+    declared = {"ns.job": [_spec()]}
 
     async with session_factory() as s, s.begin():
         await assert_declared_schedules(s, declared)
@@ -70,8 +70,8 @@ async def test_idempotent_rerun_refreshes_last_declared_at(session_factory):
 
 @pytest.mark.asyncio
 async def test_changed_cron_updates_in_place(session_factory):
-    declared_v1 = {"ns.evolve": _spec(cron="0 2 * * *", timezone="America/Vancouver")}
-    declared_v2 = {"ns.evolve": _spec(cron="30 3 * * *", timezone="Europe/London")}
+    declared_v1 = {"ns.evolve": [_spec(cron="0 2 * * *", timezone="America/Vancouver")]}
+    declared_v2 = {"ns.evolve": [_spec(cron="30 3 * * *", timezone="Europe/London")]}
 
     async with session_factory() as s, s.begin():
         await assert_declared_schedules(s, declared_v1)
@@ -90,7 +90,7 @@ async def test_changed_cron_updates_in_place(session_factory):
 
 @pytest.mark.asyncio
 async def test_revival_reasserts_declaration_gate(session_factory):
-    declared = {"ns.revive": _spec()}
+    declared = {"ns.revive": [_spec()]}
 
     async with session_factory() as s, s.begin():
         await assert_declared_schedules(s, declared)
@@ -110,7 +110,7 @@ async def test_revival_reasserts_declaration_gate(session_factory):
 
 @pytest.mark.asyncio
 async def test_operational_pause_preserved_after_assert(session_factory):
-    declared = {"ns.paused": _spec()}
+    declared = {"ns.paused": [_spec()]}
 
     async with session_factory() as s, s.begin():
         await assert_declared_schedules(s, declared)
@@ -133,7 +133,7 @@ async def test_operational_pause_preserved_after_assert(session_factory):
 
 @pytest.mark.asyncio
 async def test_concurrent_asserts_converge(session_factory):
-    declared = {"ns.concurrent": _spec()}
+    declared = {"ns.concurrent": [_spec()]}
 
     async def do_assert():
         async with session_factory() as s, s.begin():
@@ -163,11 +163,11 @@ async def test_empty_declared_set_is_noop(session_factory):
 @pytest.mark.asyncio
 async def test_policy_fields_persisted(session_factory):
     declared = {
-        "ns.full": _spec(
+        "ns.full": [_spec(
             sla=dt.timedelta(minutes=30),
             declared_duration=dt.timedelta(minutes=5),
             start_grace=dt.timedelta(minutes=10),
-        )
+        )]
     }
 
     async with session_factory() as s, s.begin():

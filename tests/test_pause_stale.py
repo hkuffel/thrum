@@ -32,7 +32,7 @@ async def _insert_and_age(session_factory, key: str, age: dt.timedelta):
     """Assert a schedule then backdate its last_declared_at by `age`."""
     ns, name = key.split(".", 1)
     async with session_factory() as s, s.begin():
-        await assert_declared_schedules(s, {key: _spec()})
+        await assert_declared_schedules(s, {key: [_spec()]})
     async with session_factory() as s, s.begin():
         await s.execute(
             text(
@@ -61,7 +61,7 @@ async def test_stale_schedule_declaration_gate_cleared(session_factory):
 @pytest.mark.asyncio
 async def test_fresh_schedule_not_cleared(session_factory):
     threshold = dt.timedelta(minutes=5)
-    declared = {"ns.fresh_job": _spec()}
+    declared = {"ns.fresh_job": [_spec()]}
     async with session_factory() as s, s.begin():
         await assert_declared_schedules(s, declared)
 
@@ -94,8 +94,8 @@ async def test_deploy_anti_thrash(session_factory):
     """Assert {X,Y}, then repeatedly assert only {X} while Y stays within
     threshold — Y's gate is not cleared until it ages past the threshold."""
     threshold = dt.timedelta(minutes=5)
-    both = {"ns.x": _spec(), "ns.y": _spec()}
-    only_x = {"ns.x": _spec()}
+    both = {"ns.x": [_spec()], "ns.y": [_spec()]}
+    only_x = {"ns.x": [_spec()]}
 
     # initial deploy declares both
     async with session_factory() as s, s.begin():
