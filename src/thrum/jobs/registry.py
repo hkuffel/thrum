@@ -125,7 +125,7 @@ class Operation(Generic[P, R]):
     retry_max_delay: float = 300.0
     retry_backoff_factor: float = 2.0
     retry_jitter: bool = True
-    declared_schedule: DeclaredSchedule | None = None
+    declared_schedules: list[DeclaredSchedule] = field(default_factory=list, repr=False)
 
     @property
     def key(self) -> str:
@@ -140,6 +140,33 @@ class Operation(Generic[P, R]):
             backoff_factor=self.retry_backoff_factor,
             jitter=self.retry_jitter,
         )
+
+    def schedule(
+        self,
+        cron: str,
+        tz: str = "UTC",
+        *,
+        sla: dt.timedelta | None = None,
+        declared_duration: dt.timedelta | None = None,
+        start_grace: dt.timedelta | None = None,
+    ) -> DeclaredSchedule:
+        """Declare a recurring schedule co-located with this operation.
+
+        Validates ``cron`` and ``tz`` immediately (fail-fast at declaration time).
+        Records the ``DeclaredSchedule`` against this operation and into the
+        process-global schedule registry for Worker startup reconcile."""
+        _validate_cron(cron)
+        _validate_timezone(tz)
+        declared = DeclaredSchedule(
+            cron=cron,
+            timezone=tz,
+            sla=sla,
+            declared_duration=declared_duration,
+            start_grace=start_grace,
+        )
+        self.declared_schedules.append(declared)
+        Registry._global_schedules.setdefault(self.key, []).append(declared)
+        return declared
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
         return self.fn(*args, **kwargs)
@@ -179,7 +206,7 @@ class Registry:
     # by named Registries AND the implicit `default` registry that bare
     # `@operation` resolves through, so the check is uniform.
     _global: dict[str, Operation] = {}
-    _global_schedules: dict[str, DeclaredSchedule] = {}
+    _global_schedules: dict[str, list[DeclaredSchedule]] = {}
 
     def __init__(self, namespace: str) -> None:
         self.namespace = namespace
@@ -197,11 +224,6 @@ class Registry:
         retry_max_delay: float = 300.0,
         retry_backoff_factor: float = 2.0,
         retry_jitter: bool = True,
-        schedule: str | None = None,
-        timezone: str = "UTC",
-        sla: dt.timedelta | None = None,
-        declared_duration: dt.timedelta | None = None,
-        start_grace: dt.timedelta | None = None,
     ) -> Any:
         """Register an Operation under this Registry's namespace. Identity is
         ``namespace.name``; pass ``name=`` to override the function name for
@@ -209,48 +231,17 @@ class Registry:
         ``namespace.name`` (against any other Registry in the process, or
         against the default registry) raises ``ValueError`` immediately.
 
-        Pass ``schedule`` (a cron string) + ``timezone`` (an IANA name like
-        ``"America/Vancouver"``) to declare a Schedule co-located with the
-        Operation — reconciled into the ``schedules`` table on every Worker
-        startup (ADR-0022). Cron / timezone validation fires here at import.
-
-        Two deliberate v1 behaviors fall out of the reconcile design and are
-        worth knowing up front:
-
-        - **Old-schedule-wins for the already-materialized horizon.** Editing
-          ``schedule`` or ``timezone`` in code updates the row at the next
-          startup, but does **not** retract or regenerate Runs the sweep has
-          already materialized over the ~24h horizon.
-        - **Removing a declaration keeps history and revives.** Deleting the
-          ``schedule`` arg (or the whole Operation) does not delete the
-          `schedules` row; re-adding the same declaration revives the original
-          row (reconcile keys on stable identity).
-        """
+        Declare recurring schedules via ``op.schedule(cron, tz=...)`` after
+        decoration — schedules are co-located with the operation definition and
+        validated (cron expression + IANA timezone) at declaration time."""
 
         def register(func: Callable[..., Any]) -> Operation:
-            declared = None
-            if schedule is not None:
-                _validate_cron(schedule)
-                _validate_timezone(timezone)
-                declared = DeclaredSchedule(
-                    cron=schedule,
-                    timezone=timezone,
-                    sla=sla,
-                    declared_duration=declared_duration,
-                    start_grace=start_grace,
-                )
-
             op_name = name or func.__name__
             key = f"{self.namespace}.{op_name}"
             if key in Registry._global:
                 raise ValueError(f"Operation identity collision on {key!r}")
 
             sig = inspect.signature(func)
-            # The capability-type registry is populated by execution-side
-            # work (PRD-0002); until Compile lands, v1 classifies against
-            # an empty set, so every keyword-only param falls through to
-            # optional Data. The same code path tightens once Compile
-            # hands the real registry in.
             sig_model = classify(func, capability_types=())
             op = Operation(
                 fn=func,
@@ -265,15 +256,8 @@ class Registry:
                 retry_max_delay=retry_max_delay,
                 retry_backoff_factor=retry_backoff_factor,
                 retry_jitter=retry_jitter,
-                declared_schedule=declared,
             )
 
-            if declared is not None:
-                if key in Registry._global_schedules:
-                    raise ValueError(
-                        f"Duplicate schedule declaration for Operation {key!r}"
-                    )
-                Registry._global_schedules[key] = declared
             Registry._global[key] = op
             self.operations[op_name] = op
             return op
@@ -302,11 +286,6 @@ def operation(
     retry_max_delay: float = ...,
     retry_backoff_factor: float = ...,
     retry_jitter: bool = ...,
-    schedule: str | None = ...,
-    timezone: str = ...,
-    sla: dt.timedelta | None = ...,
-    declared_duration: dt.timedelta | None = ...,
-    start_grace: dt.timedelta | None = ...,
 ) -> Callable[[Callable[P, R]], Operation[P, R]]: ...
 
 

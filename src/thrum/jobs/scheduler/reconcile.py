@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 async def assert_declared_schedules(
     session: AsyncSession,
-    declared: dict[str, DeclaredSchedule],
+    declared: dict[str, list[DeclaredSchedule]],
 ) -> int:
     """Persist the declared Schedule set into the `schedules` table.
 
@@ -31,21 +31,22 @@ async def assert_declared_schedules(
         return 0
 
     rows = []
-    for key, spec in declared.items():
+    for key, specs in declared.items():
         ns, name = key.split(".", 1)
-        rows.append(
-            {
-                "task_namespace": ns,
-                "task_name": name,
-                "cron": spec.cron,
-                "timezone": spec.timezone,
-                "declared_duration": spec.declared_duration,
-                "sla": spec.sla,
-                "start_grace": spec.start_grace,
-                "declaration_active": True,
-                "last_declared_at": func.now(),
-            }
-        )
+        for spec in specs:
+            rows.append(
+                {
+                    "task_namespace": ns,
+                    "task_name": name,
+                    "cron": spec.cron,
+                    "timezone": spec.timezone,
+                    "declared_duration": spec.declared_duration,
+                    "sla": spec.sla,
+                    "start_grace": spec.start_grace,
+                    "declaration_active": True,
+                    "last_declared_at": func.now(),
+                }
+            )
 
     stmt = pg_insert(Schedule).values(rows)
     stmt = stmt.on_conflict_do_update(
