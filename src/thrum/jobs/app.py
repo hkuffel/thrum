@@ -27,14 +27,10 @@ law).
 
 from __future__ import annotations
 
-import datetime as dt
-import inspect
-import types
-import uuid
-from decimal import Decimal
-from typing import Any, Union, get_args, get_origin
+from typing import Any
 
 from thrum.jobs.registry import Operation, Registry
+from thrum.jobs.serialization import is_serializable_annotation
 from thrum.jobs.signature import ParamKind, classify
 
 
@@ -135,73 +131,20 @@ def _check_operation(op: Operation, capability_types: frozenset[type]) -> list[s
             )
             continue
 
-        if not _is_json_serializable(param.annotation):
+        if not is_serializable_annotation(param.annotation):
             problems.append(
                 f"{op.key}: parameter {param.name!r} is typed "
                 f"{_render(param.annotation)}, which is not JSON-serializable "
                 f"(Data must cross the transport boundary — use an ID newtype)"
             )
 
-    if not _is_json_serializable(model.output_type):
+    if not is_serializable_annotation(model.output_type):
         problems.append(
             f"{op.key}: output type {_render(model.output_type)} is not "
             f"JSON-serializable (Run.output is JSONB)"
         )
 
     return problems
-
-
-# JSON-native scalars plus the stdlib types that routinely encode to a JSON
-# scalar (ISO strings / numbers). The check exists to catch ORM objects and
-# arbitrary classes, not to be a strict JSON purist.
-_SERIALIZABLE_TYPES = (
-    str,
-    int,
-    float,
-    bool,
-    dt.date,
-    dt.datetime,
-    dt.time,
-    dt.timedelta,
-    uuid.UUID,
-    Decimal,
-)
-
-
-def _is_json_serializable(annotation: Any) -> bool:
-    """Best-effort serializability check — only fail on known non-serializable
-    annotations; full static proof is not attempted. Unannotated and unresolvable
-    annotations pass."""
-    if annotation is inspect.Signature.empty:
-        return True
-    if annotation is None or annotation is type(None):
-        return True
-
-    supertype = getattr(annotation, "__supertype__", None)
-    if supertype is not None:  # NewType — recurse on the wrapped type
-        return _is_json_serializable(supertype)
-
-    origin = get_origin(annotation)
-    if origin is not None:
-        if origin in (Union, types.UnionType):
-            return all(_is_json_serializable(a) for a in get_args(annotation))
-        if origin in (list, set, frozenset, tuple, dict):
-            return all(
-                _is_json_serializable(a)
-                for a in get_args(annotation)
-                if a is not Ellipsis
-            )
-        return True  # other generics — be lenient
-
-    if isinstance(annotation, type):
-        # Bare containers (`dict`, `list`, ...) — contents unparameterized, so
-        # be lenient; only their concrete element types could fail, and we
-        # can't see them here.
-        if issubclass(annotation, (list, set, frozenset, tuple, dict)):
-            return True
-        return issubclass(annotation, _SERIALIZABLE_TYPES)
-
-    return True  # forward-ref string or unknown object — be lenient
 
 
 def _render(annotation: Any) -> str:
