@@ -66,6 +66,24 @@ def test_operation_captures_signature() -> None:
     assert list(foo.signature.parameters) == ["invoice_id", "sent_at"]
 
 
+def test_operation_captures_signature_model() -> None:
+    """The Operation owns a classified SignatureModel — its data
+    contract — alongside the raw signature. With v1's empty capability
+    registry, every keyword-only param is optional Data."""
+    from thrum.jobs.signature import ParamKind, SignatureModel
+
+    @operation
+    def send_receipts(customer_id: int, *, since: str | None = None) -> dict:
+        return {}
+
+    assert isinstance(send_receipts.signature_model, SignatureModel)
+    assert [(p.name, p.kind) for p in send_receipts.signature_model.parameters] == [
+        ("customer_id", ParamKind.REQUIRED_DATA),
+        ("since", ParamKind.OPTIONAL_DATA),
+    ]
+    assert send_receipts.signature_model.output_type is dict
+
+
 def test_operation_is_still_callable() -> None:
     @operation
     def add(a: int, b: int) -> int:
