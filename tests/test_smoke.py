@@ -14,20 +14,20 @@ def test_core_import_does_not_pull_in_fastapi() -> None:
             del sys.modules[mod]
 
     import thrum.jobs  # noqa: F401
-    from thrum.jobs import Registry, enqueue, task  # noqa: F401
+    from thrum.jobs import Operation, Registry, enqueue, operation  # noqa: F401
 
     assert "fastapi" not in sys.modules
 
 
-def test_task_registration_and_identity() -> None:
+def test_operation_registration_and_identity() -> None:
     from thrum.jobs import Registry
 
-    billing = Registry("billing")
+    billing = Registry("smoke_billing")
 
-    @billing.task
+    @billing.operation
     def send_receipts() -> None: ...
 
-    assert send_receipts.key == "billing.send_receipts"
+    assert send_receipts.key == "smoke_billing.send_receipts"
 
 
 def test_namespace_name_collision_fails_fast() -> None:
@@ -35,12 +35,12 @@ def test_namespace_name_collision_fails_fast() -> None:
 
     from thrum.jobs import Registry
 
-    reg = Registry("dup")
+    reg = Registry("smoke_dup")
 
-    @reg.task
+    @reg.operation
     def job() -> None: ...
 
     with pytest.raises(ValueError):
 
-        @reg.task(name="job")
+        @reg.operation(name="job")
         def other() -> None: ...

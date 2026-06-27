@@ -1,4 +1,4 @@
-"""Pure unit tests for Schedule declaration on @registry.task (issue #3).
+"""Pure unit tests for Schedule declaration on @registry.operation (issue #3).
 
 No Postgres required — these test the SDK-core validation that fires at
 import/declaration time."""
@@ -27,7 +27,7 @@ def _clean_global_registry():
 def test_schedule_captures_spec_with_policy_fields() -> None:
     reg = Registry("sched_test_1")
 
-    @reg.task(
+    @reg.operation(
         schedule="0 2 * * *",
         timezone="America/Vancouver",
         sla=dt.timedelta(minutes=30),
@@ -48,7 +48,7 @@ def test_schedule_captures_spec_with_policy_fields() -> None:
 def test_no_schedule_leaves_task_enqueue_only() -> None:
     reg = Registry("sched_test_2")
 
-    @reg.task
+    @reg.operation
     def plain_task() -> None: ...
 
     assert plain_task.declared_schedule is None
@@ -58,7 +58,7 @@ def test_invalid_cron_raises_at_declaration() -> None:
     reg = Registry("sched_test_3")
     with pytest.raises(ValueError, match="Invalid cron expression"):
 
-        @reg.task(schedule="not a cron")
+        @reg.operation(schedule="not a cron")
         def bad_cron() -> None: ...
 
 
@@ -66,7 +66,7 @@ def test_non_iana_timezone_raises_at_declaration() -> None:
     reg = Registry("sched_test_4")
     with pytest.raises(ValueError, match="Unknown IANA timezone"):
 
-        @reg.task(schedule="0 2 * * *", timezone="Fake/Zone")
+        @reg.operation(schedule="0 2 * * *", timezone="Fake/Zone")
         def bad_tz() -> None: ...
 
 
@@ -74,7 +74,7 @@ def test_fixed_offset_timezone_raises_at_declaration() -> None:
     reg = Registry("sched_test_5")
     with pytest.raises(ValueError, match="Fixed-offset timezone"):
 
-        @reg.task(schedule="0 2 * * *", timezone="-07:00")
+        @reg.operation(schedule="0 2 * * *", timezone="-07:00")
         def fixed_offset() -> None: ...
 
 
@@ -82,26 +82,26 @@ def test_positive_fixed_offset_raises() -> None:
     reg = Registry("sched_test_5b")
     with pytest.raises(ValueError, match="Fixed-offset timezone"):
 
-        @reg.task(schedule="0 2 * * *", timezone="+05:30")
+        @reg.operation(schedule="0 2 * * *", timezone="+05:30")
         def positive_offset() -> None: ...
 
 
 def test_duplicate_schedule_for_same_task_identity_raises() -> None:
     reg = Registry("sched_test_6")
 
-    @reg.task(name="the_job", schedule="0 2 * * *", timezone="UTC")
+    @reg.operation(name="the_job", schedule="0 2 * * *", timezone="UTC")
     def first() -> None: ...
 
-    with pytest.raises(ValueError, match="Task identity collision"):
+    with pytest.raises(ValueError, match="Operation identity collision"):
 
-        @reg.task(name="the_job", schedule="0 3 * * *", timezone="UTC")
-        def second() -> None: ...
+        @reg.operation(name="the_job", schedule="0 3 * * *", timezone="UTC")
+        def _second() -> None: ...
 
 
 def test_schedule_with_utc_default_timezone() -> None:
     reg = Registry("sched_test_7")
 
-    @reg.task(schedule="*/5 * * * *")
+    @reg.operation(schedule="*/5 * * * *")
     def every_five() -> None: ...
 
     assert every_five.declared_schedule is not None
@@ -111,7 +111,7 @@ def test_schedule_with_utc_default_timezone() -> None:
 def test_schedule_spec_is_frozen() -> None:
     reg = Registry("sched_test_8")
 
-    @reg.task(schedule="0 2 * * *", timezone="America/Vancouver")
+    @reg.operation(schedule="0 2 * * *", timezone="America/Vancouver")
     def my_task() -> None: ...
 
     with pytest.raises(AttributeError):
@@ -121,7 +121,7 @@ def test_schedule_spec_is_frozen() -> None:
 def test_schedule_with_minimal_policy() -> None:
     reg = Registry("sched_test_9")
 
-    @reg.task(schedule="0 0 * * 0", timezone="Europe/London")
+    @reg.operation(schedule="0 0 * * 0", timezone="Europe/London")
     def weekly() -> None: ...
 
     s = weekly.declared_schedule
@@ -139,7 +139,7 @@ def test_validation_does_not_import_worker_or_server() -> None:
 
     reg = Registry("sched_test_10")
 
-    @reg.task(schedule="0 2 * * *", timezone="America/Vancouver")
+    @reg.operation(schedule="0 2 * * *", timezone="America/Vancouver")
     def check_imports() -> None: ...
 
     if not before_worker:

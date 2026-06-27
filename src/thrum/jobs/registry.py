@@ -1,21 +1,38 @@
-"""Task and Registry (CONTEXT). A Registry declares a `namespace` once; Tasks
-attach to it and inherit that namespace. Identity is `namespace.name`,
-user-owned and stable across refactors — never derived from import path.
-Uniqueness on the full pair is enforced at Worker/registry startup (fail fast).
+"""Operation, Task, and Registry (ADR-0023 / CONTEXT). A `Registry` declares a
+`namespace` once; an `@registry.operation` inherits that namespace, and a bare
+`@operation` falls into the process-shared `default` registry. Identity is
+`namespace.name`, user-owned and stable across refactors — never derived from
+import path. The process-global view fails fast on a `namespace.name` collision
+at decoration/import time so the misconfiguration cannot reach the Worker.
 
-SDK-core surface: stdlib + croniter only, no Worker/server imports (import-discipline law)."""
+The `Operation` is the *authoring surface* — what the developer writes and what
+`.enqueue(...)` projects onto the queue. `Task` survives as an internal value
+object (worker execution still talks Task-shape via duck-typed `.fn`/
+`.retry_policy`); user code does not author Tasks directly.
+
+SDK-core surface: stdlib + croniter only, no Worker/server imports (the
+import-discipline law)."""
 
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Generic, ParamSpec, TypeVar, overload
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 
 from thrum.jobs.retry import RetryPolicy
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from thrum.jobs.models import Run
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 @dataclass(frozen=True)
@@ -49,8 +66,11 @@ def _validate_timezone(tz: str) -> None:
 
 @dataclass
 class Task:
-    """A registered Python callable plus its config. The *code*. Does not execute
-    on its own — something must create a Run of it (cron / enqueue / workflow)."""
+    """Internal value object carrying a callable's identity + execution config.
+    No longer the authoring surface (that role moved to `Operation` — ADR-0023);
+    survives as the value-object shape the Worker reads when it executes a Run.
+    Worker tests that exercise the execute/record path directly still construct
+    it."""
 
     fn: Callable[..., Any]
     namespace: str
@@ -74,8 +94,6 @@ class Task:
 
     @property
     def retry_policy(self) -> RetryPolicy:
-        """The Task's budget + backoff curve as the value object Record uses to
-        decide retry-vs-terminal on a Task failure (ADR-0021)."""
         return RetryPolicy(
             max_attempts=self.max_attempts,
             initial_delay=self.retry_initial_delay,
@@ -85,20 +103,76 @@ class Task:
         )
 
 
+@dataclass(frozen=True)
+class Operation(Generic[P, R]):
+    """The authored unit (ADR-0023). Holds resolved identity (`namespace.name`)
+    and the captured signature; projects onto the durable queue via `.enqueue`.
+    Still directly callable so unit-testing the function body does not require
+    booting the queue. Carries the same execution config the Worker reads
+    (`fn`, `retry_policy`) so a registered Operation can sit in
+    `Registry._global` without a separate Task companion."""
+
+    fn: Callable[P, R]
+    namespace: str
+    name: str
+    signature: inspect.Signature = field(repr=False)
+    max_attempts: int = 1
+    timeout: float | None = None
+    cpu_bound: bool = False
+    retry_initial_delay: float = 1.0
+    retry_max_delay: float = 300.0
+    retry_backoff_factor: float = 2.0
+    retry_jitter: bool = True
+    declared_schedule: DeclaredSchedule | None = None
+
+    @property
+    def key(self) -> str:
+        return f"{self.namespace}.{self.name}"
+
+    @property
+    def retry_policy(self) -> RetryPolicy:
+        return RetryPolicy(
+            max_attempts=self.max_attempts,
+            initial_delay=self.retry_initial_delay,
+            max_delay=self.retry_max_delay,
+            backoff_factor=self.retry_backoff_factor,
+            jitter=self.retry_jitter,
+        )
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
+        return self.fn(*args, **kwargs)
+
+    def enqueue(self, session: Session, **inputs: Any) -> Run:
+        """Insert a `pending` Run on the caller's session. Validates `inputs`
+        against the operation's signature so a missing or misspelled input
+        fails at the call, not later in the worker. Does not commit — the
+        caller commits inside their own transaction (ADR-0001/0006)."""
+        # Trigger Python's own argument-binding rules so missing/extra/duplicate
+        # parameters surface as TypeError before any DB I/O.
+        self.signature.bind(**inputs)
+
+        from thrum.jobs.enqueue import enqueue as _enqueue
+
+        return _enqueue(session, self.key, **inputs)
+
+
 class Registry:
     """A named grouping that declares a namespace once. Many Registries coexist
     (e.g. `billing`, `marketing`) so two functions named `send_receipts` don't
-    collide."""
+    collide — `billing.send_receipts` and `marketing.send_receipts` are
+    distinct identities."""
 
-    # Process-global view used to fail fast on namespace.name collisions.
-    _global: dict[str, Task] = {}
+    # Process-global view used to fail fast on namespace.name collisions. Shared
+    # by named Registries AND the implicit `default` registry that bare
+    # `@operation` resolves through, so the check is uniform.
+    _global: dict[str, Operation] = {}
     _global_schedules: dict[str, DeclaredSchedule] = {}
 
     def __init__(self, namespace: str) -> None:
         self.namespace = namespace
-        self.tasks: dict[str, Task] = {}
+        self.operations: dict[str, Operation] = {}
 
-    def task(
+    def operation(
         self,
         fn: Callable[..., Any] | None = None,
         *,
@@ -116,12 +190,16 @@ class Registry:
         declared_duration: dt.timedelta | None = None,
         start_grace: dt.timedelta | None = None,
     ) -> Any:
-        """Register a Task. Pass `schedule` (a cron string) + `timezone` (an IANA
-        name like ``"America/Vancouver"``) to declare a Schedule co-located with
-        the Task — reconciled into the `schedules` table on every Worker startup
-        (ADR-0022). Validation of the cron expression and timezone fires
-        immediately at import; a typo or fixed-offset tz raises here, not silently
-        at runtime.
+        """Register an Operation under this Registry's namespace. Identity is
+        ``namespace.name``; pass ``name=`` to override the function name for
+        the rare case where it isn't the identity you want. A duplicate
+        ``namespace.name`` (against any other Registry in the process, or
+        against the default registry) raises ``ValueError`` immediately.
+
+        Pass ``schedule`` (a cron string) + ``timezone`` (an IANA name like
+        ``"America/Vancouver"``) to declare a Schedule co-located with the
+        Operation — reconciled into the ``schedules`` table on every Worker
+        startup (ADR-0022). Cron / timezone validation fires here at import.
 
         Two deliberate v1 behaviors fall out of the reconcile design and are
         worth knowing up front:
@@ -129,21 +207,14 @@ class Registry:
         - **Old-schedule-wins for the already-materialized horizon.** Editing
           ``schedule`` or ``timezone`` in code updates the row at the next
           startup, but does **not** retract or regenerate Runs the sweep has
-          already materialized over the ~24h horizon. Your edit takes effect
-          for occurrences materialized *after* it lands; the ≤horizon of
-          already-scheduled Runs fire on the old rule. Pausing (removing the
-          declaration) *is* honored at the next sweep — only retroactive
-          retraction of already-created rows is deferred.
+          already materialized over the ~24h horizon.
         - **Removing a declaration keeps history and revives.** Deleting the
-          ``schedule`` arg (or the whole Task) does not delete the `schedules`
-          row — the leader sweep clears its declaration gate once
-          ``last_declared_at`` ages past ``stale_threshold``, but the row and
-          its past Runs/missed occurrences survive so you can still answer
-          "did this job run last week?" Re-adding the same declaration revives
-          the original row (reconcile keys on stable Task identity).
+          ``schedule`` arg (or the whole Operation) does not delete the
+          `schedules` row; re-adding the same declaration revives the original
+          row (reconcile keys on stable identity).
         """
 
-        def register(func: Callable[..., Any]) -> Task:
+        def register(func: Callable[..., Any]) -> Operation:
             declared = None
             if schedule is not None:
                 _validate_cron(schedule)
@@ -156,10 +227,16 @@ class Registry:
                     start_grace=start_grace,
                 )
 
-            t = Task(
+            op_name = name or func.__name__
+            key = f"{self.namespace}.{op_name}"
+            if key in Registry._global:
+                raise ValueError(f"Operation identity collision on {key!r}")
+
+            op = Operation(
                 fn=func,
                 namespace=self.namespace,
-                name=name or func.__name__,
+                name=op_name,
+                signature=inspect.signature(func),
                 max_attempts=max_attempts,
                 timeout=timeout,
                 cpu_bound=cpu_bound,
@@ -169,22 +246,58 @@ class Registry:
                 retry_jitter=retry_jitter,
                 declared_schedule=declared,
             )
-            if t.key in Registry._global:
-                raise ValueError(f"Task identity collision on {t.key!r}")
+
             if declared is not None:
-                existing = Registry._global_schedules.get(t.key)
-                if existing is not None:
+                if key in Registry._global_schedules:
                     raise ValueError(
-                        f"Duplicate schedule declaration for Task {t.key!r}"
+                        f"Duplicate schedule declaration for Operation {key!r}"
                     )
-                Registry._global_schedules[t.key] = declared
-            Registry._global[t.key] = t
-            self.tasks[t.name] = t
-            return t
+                Registry._global_schedules[key] = declared
+            Registry._global[key] = op
+            self.operations[op_name] = op
+            return op
 
         return register(fn) if fn is not None else register
 
 
-# Module-level convenience registry under the default namespace.
-_default = Registry("default")
-task = _default.task
+# The implicit Registry a bare `@operation` resolves through. Module-level so
+# bare uses share collision state with named Registries (the fail-fast check is
+# uniform across both paths).
+_default_registry = Registry("default")
+
+
+@overload
+def operation(fn: Callable[P, R]) -> Operation[P, R]: ...
+
+
+@overload
+def operation(
+    *,
+    name: str | None = ...,
+    max_attempts: int = ...,
+    timeout: float | None = ...,
+    cpu_bound: bool = ...,
+    retry_initial_delay: float = ...,
+    retry_max_delay: float = ...,
+    retry_backoff_factor: float = ...,
+    retry_jitter: bool = ...,
+    schedule: str | None = ...,
+    timezone: str = ...,
+    sla: dt.timedelta | None = ...,
+    declared_duration: dt.timedelta | None = ...,
+    start_grace: dt.timedelta | None = ...,
+) -> Callable[[Callable[P, R]], Operation[P, R]]: ...
+
+
+def operation(
+    fn: Callable[P, R] | None = None,
+    **kwargs: Any,
+) -> Operation[P, R] | Callable[[Callable[P, R]], Operation[P, R]]:
+    """Mark a function as a Thrum Operation. A bare ``@operation`` falls into
+    the ``default`` namespace via the process-shared default Registry —
+    identity is ``namespace.name``, user-owned and stable across refactors.
+    Pass ``name=`` to override the function name as the identity.
+
+    Equivalent to ``@_default_registry.operation`` — the same fail-fast
+    collision check applies."""
+    return _default_registry.operation(fn, **kwargs)

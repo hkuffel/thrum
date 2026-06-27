@@ -47,7 +47,7 @@ async def test_e2e_declared_schedule_through_the_front_door(
 ):
     reg = Registry("e2e")
 
-    @reg.task(schedule="* * * * *", timezone="UTC")
+    @reg.operation(schedule="* * * * *", timezone="UTC")
     def send_receipts():
         return {"sent": True}
 
