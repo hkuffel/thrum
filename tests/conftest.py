@@ -7,6 +7,26 @@ import pytest
 import pytest_asyncio
 
 
+@pytest.fixture(autouse=True)
+def _clean_global_registry():
+    """The Registry's process-global view bleeds between tests (bare
+    `@operation` registers under `default`) — isolate it so each test gets a
+    clean slate."""
+    from thrum import Registry
+
+    saved_ops = Registry._global.copy()
+    saved_schedules = Registry._global_schedules.copy()
+    Registry._global.clear()
+    Registry._global_schedules.clear()
+    try:
+        yield
+    finally:
+        Registry._global.clear()
+        Registry._global.update(saved_ops)
+        Registry._global_schedules.clear()
+        Registry._global_schedules.update(saved_schedules)
+
+
 @pytest.fixture(scope="session")
 def postgres_dsn() -> str:
     """A throwaway Postgres for the test session.

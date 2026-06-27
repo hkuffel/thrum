@@ -23,24 +23,6 @@ import pytest
 from thrum import Operation, Registry, operation
 
 
-@pytest.fixture(autouse=True)
-def _clean_global_registry():
-    """The Registry's process-global view bleeds between tests (bare
-    `@operation` now registers under `default` too) — isolate it so each test
-    gets a clean slate."""
-    saved_ops = Registry._global.copy()
-    saved_schedules = Registry._global_schedules.copy()
-    Registry._global.clear()
-    Registry._global_schedules.clear()
-    try:
-        yield
-    finally:
-        Registry._global.clear()
-        Registry._global.update(saved_ops)
-        Registry._global_schedules.clear()
-        Registry._global_schedules.update(saved_schedules)
-
-
 def test_bare_operation_falls_into_default_namespace() -> None:
     @operation
     def foo() -> None: ...

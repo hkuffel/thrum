@@ -198,8 +198,8 @@ async def test_due_scheduled_run_is_claimed_and_flipped_running(session_factory)
     async with session_factory() as session, session.begin():
         run = Run(
             schedule_id=sched.id,
-            task_namespace="billing",
-            task_name="send_receipts",
+            operation_namespace="billing",
+            operation_name="send_receipts",
             trigger=Trigger.schedule,
             status=RunStatus.scheduled,
             fire_time=dt.datetime.now(dt.UTC) - dt.timedelta(seconds=5),
@@ -220,8 +220,8 @@ async def test_future_scheduled_run_is_not_claimed(session_factory):
     async with session_factory() as session, session.begin():
         run = Run(
             schedule_id=sched.id,
-            task_namespace="billing",
-            task_name="send_receipts",
+            operation_namespace="billing",
+            operation_name="send_receipts",
             trigger=Trigger.schedule,
             status=RunStatus.scheduled,
             fire_time=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
@@ -247,8 +247,8 @@ async def _add_scheduled_run(session_factory, *, fire_offset: dt.timedelta) -> R
     async with session_factory() as session, session.begin():
         run = Run(
             schedule_id=sched.id,
-            task_namespace="billing",
-            task_name="send_receipts",
+            operation_namespace="billing",
+            operation_name="send_receipts",
             trigger=Trigger.schedule,
             status=RunStatus.scheduled,
             fire_time=func.now() + fire_offset,
