@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 def enqueue(
     session: Session,
     task: Task | str,
+    *,
     max_attempts: int | None = None,
     **inputs: Any,
 ) -> Run:
