@@ -146,7 +146,7 @@ async def test_operational_pause_not_touched(session_factory):
     # simulate v2 operational pause
     async with session_factory() as s, s.begin():
         row = await _get_schedule(s, "ns", "ops_paused")
-        row.operationally_paused_at = dt.datetime.now(dt.timezone.utc)
+        row.operationally_paused_at = dt.datetime.now(dt.UTC)
         row.operationally_paused_by = "admin"
 
     async with session_factory() as s, s.begin():

@@ -1,5 +1,5 @@
-"""Lease-recovery tests (PRD 0002): Heartbeat, leader election, and Reaper against
-real Postgres, plus the Worker-death e2e.
+"""Lease-recovery tests: Heartbeat, leader election, and Reaper against real
+Postgres, plus the Worker-death e2e.
 
 Mirrors test_worker.py: assertions are on observable DB state (Attempt outcome /
 ended_at / lease, Run status / next_attempt_at, advisory-lock holders), never on
@@ -47,8 +47,7 @@ async def _force_lease_into_past(session_factory, attempt_id):
         )
 
 
-# --- Heartbeat (real DB) ---------------------------------------------------
-
+# Heartbeat (real DB)
 
 async def test_heartbeat_renews_open_attempt(session_factory):
     await _enqueue(session_factory, "billing.send_receipts", invoice_id=1)
@@ -111,8 +110,7 @@ async def test_heartbeat_does_not_renew_closed_attempt(session_factory):
         assert attempt.lease_expires_at < db_now  # not renewed
 
 
-# --- Leader election (real DB) ---------------------------------------------
-
+# Leader election (real DB)
 
 async def test_exactly_one_session_holds_the_sweep_lock(migrated_dsn, session_factory):
     from thrum.jobs.db.engine import make_async_engine
@@ -134,8 +132,7 @@ async def test_exactly_one_session_holds_the_sweep_lock(migrated_dsn, session_fa
         await engine.dispose()
 
 
-# --- Reaper (real DB) ------------------------------------------------------
-
+# Reaper (real DB)
 
 async def test_reaper_closes_orphan_abandoned_and_requeues_run(session_factory):
     run_id = await _enqueue(session_factory, "billing.send_receipts", invoice_id=1)
@@ -190,8 +187,7 @@ async def test_reaped_run_is_immediately_reclaimable(session_factory):
         assert attempt.claimed_by == "worker-2"
 
 
-# --- End-to-end: Worker death -> reaped -> re-runs -------------------------
-
+# End-to-end: Worker death -> reaped -> re-runs
 
 async def test_e2e_dead_worker_orphan_is_reaped_and_rerun(session_factory):
     def send(invoice_id):

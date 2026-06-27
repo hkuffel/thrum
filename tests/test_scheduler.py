@@ -1,5 +1,5 @@
-"""Materialization + missed-detection tests (PRD 0003): the cron wedge proven
-against real Postgres.
+"""Materialization + missed-detection tests: the cron wedge proven against real
+Postgres.
 
 Assertions are on observable DB state (Run status / fire_time / Expectation
 columns, Attempt outcome) and the real timezone authority — Postgres `tzdata` via
@@ -48,8 +48,7 @@ async def _add_schedule(session_factory, **kw) -> Schedule:
         ).scalars().first()
 
 
-# --- Materialization -------------------------------------------------------
-
+# Materialization
 
 async def test_materialize_creates_scheduled_runs_over_horizon(session_factory):
     sched = await _add_schedule(session_factory, cron="0 * * * *", timezone="UTC")
@@ -153,7 +152,7 @@ async def test_both_gates_active_materializes(session_factory):
     assert inserted > 0
 
 
-# --- DST policy against real Postgres tzdata (ADR-0015) --------------------
+# DST policy against real Postgres tzdata (ADR-0015)
 
 
 async def test_dst_spring_forward_shifts_to_next_valid_instant(session_factory):
@@ -189,8 +188,7 @@ async def test_dst_fall_back_fires_once(session_factory):
     assert len(fire_times) == 1
 
 
-# --- `scheduled` claim arm -------------------------------------------------
-
+# `scheduled` claim arm
 
 async def test_due_scheduled_run_is_claimed_and_flipped_running(session_factory):
     sched = await _add_schedule(session_factory)
@@ -239,8 +237,7 @@ async def test_future_scheduled_run_is_not_claimed(session_factory):
         assert got.status == RunStatus.scheduled  # untouched
 
 
-# --- Missed-detection ------------------------------------------------------
-
+# Missed-detection
 
 async def _add_scheduled_run(session_factory, *, fire_offset: dt.timedelta) -> Run:
     sched = await _add_schedule(session_factory)
@@ -303,8 +300,7 @@ async def test_missed_skips_already_claimed_run(session_factory):
         assert run.status == RunStatus.running
 
 
-# --- End-to-end: the whole wedge ------------------------------------------
-
+# End-to-end: the whole wedge
 
 async def test_e2e_schedule_materializes_claims_and_succeeds(session_factory):
     """Schedule → sweep materializes a due occurrence → Worker claims and runs it

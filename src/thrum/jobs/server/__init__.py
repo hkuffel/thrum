@@ -1,7 +1,7 @@
-"""The Control Plane (ADR-0011): the single API through which humans and agents
-observe and command the system. Dashboard, `--json` CLI, and (v2) MCP server are
-thin clients of it. This subpackage is the ONLY one that may import FastAPI, and
-it lives behind the `[server]` extra.
+"""The Control Plane: the single API through which humans and agents observe and
+command the system. Dashboard, `--json` CLI, and (v2) MCP server are thin clients
+of it. This subpackage is the ONLY one that may import FastAPI, and it lives
+behind the `[server]` extra.
 
 Importing it without the extra installed gives a clear, actionable error rather
 than a bare ModuleNotFoundError.

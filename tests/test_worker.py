@@ -32,8 +32,7 @@ async def _enqueue(session_factory, key: str, **inputs):
         return run.id
 
 
-# --- Execute (pure, no DB) -------------------------------------------------
-
+# Execute (pure, no DB)
 
 async def test_execute_run_success_captures_dict_output():
     def send(invoice_id):
@@ -85,8 +84,7 @@ async def test_execute_run_unregistered_task_fails_cleanly():
     assert "not registered" in result.error
 
 
-# --- Claim (real DB) -------------------------------------------------------
-
+# Claim (real DB)
 
 async def test_claim_marks_running_and_stamps_lease(session_factory):
     run_id = await _enqueue(session_factory, "billing.send_receipts", invoice_id=1)
@@ -139,8 +137,7 @@ async def test_claim_respects_capacity_limit(session_factory):
     assert len(claimed) == 2
 
 
-# --- Record (real DB) ------------------------------------------------------
-
+# Record (real DB)
 
 async def test_record_success_sets_run_terminal(session_factory):
     run_id = await _enqueue(session_factory, "billing.send_receipts", invoice_id=1)
@@ -179,8 +176,7 @@ async def test_record_failure_sets_run_failed(session_factory):
         assert attempt.error == "Traceback…"
 
 
-# --- End-to-end (real DB) --------------------------------------------------
-
+# End-to-end (real DB)
 
 async def test_e2e_enqueue_runs_to_succeeded(session_factory):
     def send(invoice_id):
