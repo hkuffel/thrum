@@ -100,7 +100,11 @@ def is_serializable_annotation(annotation: Any) -> bool:
     if origin is not None:
         if origin in (Union, types.UnionType):
             return all(is_serializable_annotation(a) for a in get_args(annotation))
-        if origin in (list, set, frozenset, tuple, dict):
+        # set/frozenset have no JSON form, so the runtime guard rejects their
+        # values — the lint must reject the annotation to stay in lockstep.
+        if origin in (set, frozenset):
+            return False
+        if origin in (list, tuple, dict):
             return all(
                 is_serializable_annotation(a)
                 for a in get_args(annotation)
@@ -110,8 +114,9 @@ def is_serializable_annotation(annotation: Any) -> bool:
 
     if isinstance(annotation, type):
         # Bare containers (`dict`, `list`, ...) — element types are invisible
-        # here, so be lenient; only their concrete elements could fail.
-        if issubclass(annotation, (list, set, frozenset, tuple, dict)):
+        # here, so be lenient; only their concrete elements could fail. A bare
+        # set/frozenset falls through to the scalar check, which rejects it.
+        if issubclass(annotation, (list, tuple, dict)):
             return True
         return issubclass(annotation, _SERIALIZABLE_TYPES)
 

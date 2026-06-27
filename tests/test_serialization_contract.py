@@ -136,3 +136,13 @@ def test_annotation_lint_agrees_with_runtime_guard() -> None:
     assert is_serializable_annotation(int)
     assert is_serializable_annotation(list[int])
     assert not is_serializable_annotation(Customer)
+
+
+def test_set_annotation_is_rejected_like_set_values() -> None:
+    """JSON has no set type: the runtime guard rejects set values, so the lint
+    must reject set/frozenset annotations too — bare and parameterized."""
+    with pytest.raises(SerializationContractError):
+        ensure_serializable({1, 2}, owner="default.op", role="output")
+    assert not is_serializable_annotation(set)
+    assert not is_serializable_annotation(set[int])
+    assert not is_serializable_annotation(frozenset[int])
