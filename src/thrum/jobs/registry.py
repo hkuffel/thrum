@@ -118,7 +118,7 @@ class Operation(Generic[P, R]):
     name: str
     signature: inspect.Signature = field(repr=False)
     signature_model: SignatureModel = field(repr=False)
-    max_attempts: int = 1
+    retries: int = 0
     timeout: float | None = None
     cpu_bound: bool = False
     retry_initial_delay: float = 1.0
@@ -134,7 +134,7 @@ class Operation(Generic[P, R]):
     @property
     def retry_policy(self) -> RetryPolicy:
         return RetryPolicy(
-            max_attempts=self.max_attempts,
+            max_attempts=self.retries + 1,
             initial_delay=self.retry_initial_delay,
             max_delay=self.retry_max_delay,
             backoff_factor=self.retry_backoff_factor,
@@ -144,13 +144,20 @@ class Operation(Generic[P, R]):
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
         return self.fn(*args, **kwargs)
 
-    def enqueue(self, session: Session, **inputs: Any) -> Run:
+    def enqueue(self, session: Session, *, retries: int | None = None, **inputs: Any) -> Run:
         """Insert a `pending` Run on the caller's session. Validates `inputs`
         against the operation's **input schema** (the data-only signature with
         capability params stripped) so a missing or misspelled input — and a
         capability-named input — fails at the call, not later in the worker.
         Does not commit — the caller commits inside their own transaction
-        (ADR-0001/0006)."""
+        (ADR-0001/0006).
+
+        Pass ``retries=N`` to override the operation's durability default for
+        this one call only; omit it to inherit the operation's default. This
+        override is stored on the Run (as max_attempts = N+1) so the Worker
+        can read it at execution time. Non-durable projections (future HTTP)
+        must not pass this to the Run — durability semantics belong only to
+        durable projections (queue/timer)."""
         # Python's own argument-binding rules over the data-only signature
         # surface the right diagnostic (missing required, unexpected kwarg)
         # before any DB I/O.
@@ -158,7 +165,8 @@ class Operation(Generic[P, R]):
 
         from thrum.jobs.enqueue import enqueue as _enqueue
 
-        return _enqueue(session, self.key, **inputs)
+        max_attempts = retries + 1 if retries is not None else None
+        return _enqueue(session, self.key, max_attempts=max_attempts, **inputs)
 
 
 class Registry:
@@ -182,7 +190,7 @@ class Registry:
         fn: Callable[..., Any] | None = None,
         *,
         name: str | None = None,
-        max_attempts: int = 1,
+        retries: int = 0,
         timeout: float | None = None,
         cpu_bound: bool = False,
         retry_initial_delay: float = 1.0,
@@ -250,7 +258,7 @@ class Registry:
                 name=op_name,
                 signature=sig,
                 signature_model=sig_model,
-                max_attempts=max_attempts,
+                retries=retries,
                 timeout=timeout,
                 cpu_bound=cpu_bound,
                 retry_initial_delay=retry_initial_delay,
@@ -287,7 +295,7 @@ def operation(fn: Callable[P, R]) -> Operation[P, R]: ...
 def operation(
     *,
     name: str | None = ...,
-    max_attempts: int = ...,
+    retries: int = ...,
     timeout: float | None = ...,
     cpu_bound: bool = ...,
     retry_initial_delay: float = ...,

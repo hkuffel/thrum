@@ -19,9 +19,20 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def enqueue(session: Session, task: Task | str, **inputs: Any) -> Run:
+def enqueue(
+    session: Session,
+    task: Task | str,
+    *,
+    max_attempts: int | None = None,
+    **inputs: Any,
+) -> Run:
     """Insert a `pending` Run on the caller's session. Does not commit — the
-    caller commits as part of their own transaction (that *is* the point)."""
+    caller commits as part of their own transaction (that *is* the point).
+
+    ``max_attempts`` carries a per-call durability override set by
+    ``op.enqueue(..., retries=N)`` as N+1; NULL means inherit the Operation's
+    default at execution time. Only the queue projection (enqueue) sets this;
+    non-durable projections (future HTTP) must leave it NULL."""
     key = task.key if isinstance(task, Task) else task
     namespace, _, name = key.rpartition(".")
     run = Run(
@@ -30,6 +41,7 @@ def enqueue(session: Session, task: Task | str, **inputs: Any) -> Run:
         trigger=Trigger.enqueue,
         status=RunStatus.pending,
         inputs=inputs,
+        max_attempts=max_attempts,
         # next_attempt_at left NULL == claimable immediately; backoff sets it later.
     )
     session.add(run)

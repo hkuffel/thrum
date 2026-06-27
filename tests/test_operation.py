@@ -16,6 +16,7 @@ reach the Worker.
 from __future__ import annotations
 
 import inspect
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -200,3 +201,113 @@ def test_bare_operation_collision_against_named_default_registry() -> None:
 
         @operation
         def foo() -> None: ...  # noqa: F811
+
+
+# --- Execution-nature + durability config (issue #6) ----------------------
+
+
+def test_operation_decorator_accepts_retries_param() -> None:
+    @operation(retries=3)
+    def send_receipts() -> None: ...
+
+    assert send_receipts.retries == 3
+
+
+def test_operation_decorator_retries_default_is_zero() -> None:
+    @operation
+    def send_receipts() -> None: ...
+
+    assert send_receipts.retries == 0
+
+
+def test_operation_retry_policy_converts_retries_to_max_attempts() -> None:
+    """retries=N maps to max_attempts=N+1 in the RetryPolicy so the single-attempt
+    default (retries=0) keeps existing behavior unchanged."""
+    @operation(retries=2)
+    def send_receipts() -> None: ...
+
+    assert send_receipts.retry_policy.max_attempts == 3
+
+
+def test_operation_decorator_accepts_execution_nature_params() -> None:
+    @operation(timeout=30.0, cpu_bound=True)
+    def crunch() -> None: ...
+
+    assert crunch.timeout == 30.0
+    assert crunch.cpu_bound is True
+
+
+def test_operation_decorator_accepts_full_retry_curve() -> None:
+    @operation(
+        retries=5,
+        retry_initial_delay=2.0,
+        retry_max_delay=120.0,
+        retry_backoff_factor=1.5,
+        retry_jitter=False,
+    )
+    def send_receipts() -> None: ...
+
+    assert send_receipts.retries == 5
+    p = send_receipts.retry_policy
+    assert p.max_attempts == 6
+    assert p.initial_delay == 2.0
+    assert p.max_delay == 120.0
+    assert p.backoff_factor == 1.5
+    assert p.jitter is False
+
+
+def test_op_enqueue_per_call_retries_override_stored_on_run() -> None:
+    """op.enqueue(..., retries=N) stores max_attempts=N+1 on the Run so the
+    Worker can honour it at execution time without touching the Operation."""
+    @operation
+    def send_receipts(invoice_id: int) -> None: ...
+
+    mock_session = MagicMock()
+    run = send_receipts.enqueue(mock_session, retries=5, invoice_id=42)
+    assert run.max_attempts == 6
+
+
+def test_op_enqueue_no_override_leaves_max_attempts_null() -> None:
+    """Without a per-call override the Run's max_attempts is NULL — the Worker
+    inherits the Operation's default durability policy."""
+    @operation
+    def send_receipts(invoice_id: int) -> None: ...
+
+    mock_session = MagicMock()
+    run = send_receipts.enqueue(mock_session, invoice_id=42)
+    assert run.max_attempts is None
+
+
+def test_op_enqueue_retries_zero_stored_as_max_attempts_one() -> None:
+    """retries=0 override (one attempt, no retries) stores max_attempts=1."""
+    @operation
+    def send_receipts(invoice_id: int) -> None: ...
+
+    mock_session = MagicMock()
+    run = send_receipts.enqueue(mock_session, retries=0, invoice_id=42)
+    assert run.max_attempts == 1
+
+
+def test_op_enqueue_retries_not_treated_as_data_input() -> None:
+    """retries= is a projection-control kwarg, not a data input — passing it
+    must not appear in Run.inputs and must not be validated against the data
+    schema (which has no `retries` param)."""
+    @operation
+    def send_receipts(invoice_id: int) -> None: ...
+
+    mock_session = MagicMock()
+    run = send_receipts.enqueue(mock_session, retries=2, invoice_id=99)
+    assert "retries" not in run.inputs
+
+
+def test_non_durable_direct_call_does_not_apply_durability_config() -> None:
+    """A non-durable projection (e.g. future HTTP) calls the Operation directly —
+    no Run is created, durability defaults are irrelevant. Encoded here to pin
+    that direct invocation bypasses all durability machinery."""
+    @operation(retries=10)
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    # Direct call: no session, no Run, no retry logic — just the function.
+    result = add(2, 3)
+    assert result == 5
