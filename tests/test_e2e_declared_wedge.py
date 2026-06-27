@@ -47,9 +47,11 @@ async def test_e2e_declared_schedule_through_the_front_door(
 ):
     reg = Registry("e2e")
 
-    @reg.operation(schedule="* * * * *", timezone="UTC")
+    @reg.operation
     def send_receipts():
         return {"sent": True}
+
+    send_receipts.schedule("* * * * *", tz="UTC")
 
     # --- Startup assert ----------------------------------------------------
     # The Worker's startup reconcile is what writes the `schedules` row. Drive

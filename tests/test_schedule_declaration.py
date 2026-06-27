@@ -1,6 +1,6 @@
-"""Pure unit tests for Schedule declaration on @registry.operation (issue #3).
+"""Unit tests for op.schedule(cron, tz=...) declaration (issue #7).
 
-No Postgres required — these test the SDK-core validation that fires at
+No Postgres required — these test SDK-core validation that fires at
 import/declaration time."""
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from thrum.jobs.registry import DeclaredSchedule, Registry
 
 @pytest.fixture(autouse=True)
 def _clean_global_registry():
-    """Isolate each test from the process-global registry state."""
     saved = Registry._global.copy()
     saved_schedules = Registry._global_schedules.copy()
     yield
@@ -24,20 +23,22 @@ def _clean_global_registry():
     Registry._global_schedules.update(saved_schedules)
 
 
-def test_schedule_captures_spec_with_policy_fields() -> None:
+def test_schedule_records_declared_schedule() -> None:
     reg = Registry("sched_test_1")
 
-    @reg.operation(
-        schedule="0 2 * * *",
-        timezone="America/Vancouver",
+    @reg.operation
+    def nightly_reconcile() -> None: ...
+
+    s = nightly_reconcile.schedule(
+        "0 2 * * *",
+        tz="America/Vancouver",
         sla=dt.timedelta(minutes=30),
         declared_duration=dt.timedelta(minutes=5),
         start_grace=dt.timedelta(minutes=10),
     )
-    def nightly_reconcile() -> None: ...
 
-    assert nightly_reconcile.declared_schedule is not None
-    s = nightly_reconcile.declared_schedule
+    assert len(nightly_reconcile.declared_schedules) == 1
+    assert s is nightly_reconcile.declared_schedules[0]
     assert s.cron == "0 2 * * *"
     assert s.timezone == "America/Vancouver"
     assert s.sla == dt.timedelta(minutes=30)
@@ -45,90 +46,145 @@ def test_schedule_captures_spec_with_policy_fields() -> None:
     assert s.start_grace == dt.timedelta(minutes=10)
 
 
-def test_no_schedule_leaves_task_enqueue_only() -> None:
+def test_no_schedule_leaves_list_empty() -> None:
     reg = Registry("sched_test_2")
 
     @reg.operation
     def plain_task() -> None: ...
 
-    assert plain_task.declared_schedule is None
+    assert plain_task.declared_schedules == []
+
+
+def test_many_schedules_per_operation() -> None:
+    reg = Registry("sched_test_2b")
+
+    @reg.operation
+    def multi() -> None: ...
+
+    multi.schedule("0 2 * * *", tz="UTC")
+    multi.schedule("0 9 * * 1", tz="America/New_York")
+
+    assert len(multi.declared_schedules) == 2
+    assert multi.declared_schedules[0].cron == "0 2 * * *"
+    assert multi.declared_schedules[1].cron == "0 9 * * 1"
 
 
 def test_invalid_cron_raises_at_declaration() -> None:
     reg = Registry("sched_test_3")
-    with pytest.raises(ValueError, match="Invalid cron expression"):
 
-        @reg.operation(schedule="not a cron")
-        def bad_cron() -> None: ...
+    @reg.operation
+    def bad_op() -> None: ...
+
+    with pytest.raises(ValueError, match="Invalid cron expression"):
+        bad_op.schedule("not a cron")
 
 
 def test_non_iana_timezone_raises_at_declaration() -> None:
     reg = Registry("sched_test_4")
-    with pytest.raises(ValueError, match="Unknown IANA timezone"):
 
-        @reg.operation(schedule="0 2 * * *", timezone="Fake/Zone")
-        def bad_tz() -> None: ...
+    @reg.operation
+    def bad_tz_op() -> None: ...
+
+    with pytest.raises(ValueError, match="Unknown IANA timezone"):
+        bad_tz_op.schedule("0 2 * * *", tz="Fake/Zone")
 
 
 def test_fixed_offset_timezone_raises_at_declaration() -> None:
     reg = Registry("sched_test_5")
-    with pytest.raises(ValueError, match="Fixed-offset timezone"):
 
-        @reg.operation(schedule="0 2 * * *", timezone="-07:00")
-        def fixed_offset() -> None: ...
+    @reg.operation
+    def fixed_neg() -> None: ...
+
+    with pytest.raises(ValueError, match="Fixed-offset timezone"):
+        fixed_neg.schedule("0 2 * * *", tz="-07:00")
 
 
 def test_positive_fixed_offset_raises() -> None:
     reg = Registry("sched_test_5b")
+
+    @reg.operation
+    def fixed_pos() -> None: ...
+
     with pytest.raises(ValueError, match="Fixed-offset timezone"):
-
-        @reg.operation(schedule="0 2 * * *", timezone="+05:30")
-        def positive_offset() -> None: ...
+        fixed_pos.schedule("0 2 * * *", tz="+05:30")
 
 
-def test_duplicate_schedule_for_same_task_identity_raises() -> None:
-    reg = Registry("sched_test_6")
-
-    @reg.operation(name="the_job", schedule="0 2 * * *", timezone="UTC")
-    def first() -> None: ...
-
-    with pytest.raises(ValueError, match="Operation identity collision"):
-
-        @reg.operation(name="the_job", schedule="0 3 * * *", timezone="UTC")
-        def _second() -> None: ...
-
-
-def test_schedule_with_utc_default_timezone() -> None:
+def test_schedule_defaults_to_utc() -> None:
     reg = Registry("sched_test_7")
 
-    @reg.operation(schedule="*/5 * * * *")
+    @reg.operation
     def every_five() -> None: ...
 
-    assert every_five.declared_schedule is not None
-    assert every_five.declared_schedule.timezone == "UTC"
+    s = every_five.schedule("*/5 * * * *")
+
+    assert s.timezone == "UTC"
 
 
-def test_schedule_spec_is_frozen() -> None:
+def test_schedule_is_frozen() -> None:
     reg = Registry("sched_test_8")
 
-    @reg.operation(schedule="0 2 * * *", timezone="America/Vancouver")
+    @reg.operation
     def my_task() -> None: ...
 
+    s = my_task.schedule("0 2 * * *", tz="America/Vancouver")
+
     with pytest.raises(AttributeError):
-        my_task.declared_schedule.cron = "0 3 * * *"  # type: ignore[misc]
+        s.cron = "0 3 * * *"  # type: ignore[misc]
 
 
 def test_schedule_with_minimal_policy() -> None:
     reg = Registry("sched_test_9")
 
-    @reg.operation(schedule="0 0 * * 0", timezone="Europe/London")
+    @reg.operation
     def weekly() -> None: ...
 
-    s = weekly.declared_schedule
-    assert s is not None
+    s = weekly.schedule("0 0 * * 0", tz="Europe/London")
+
     assert s.sla is None
     assert s.declared_duration is None
     assert s.start_grace is None
+
+
+def test_schedule_registers_into_global_schedules() -> None:
+    reg = Registry("sched_test_10")
+
+    @reg.operation
+    def reconciled() -> None: ...
+
+    reconciled.schedule("0 2 * * *", tz="UTC")
+
+    key = "sched_test_10.reconciled"
+    assert key in Registry._global_schedules
+    assert len(Registry._global_schedules[key]) == 1
+    assert Registry._global_schedules[key][0].cron == "0 2 * * *"
+
+
+def test_multiple_schedules_all_registered_globally() -> None:
+    reg = Registry("sched_test_11")
+
+    @reg.operation
+    def multi() -> None: ...
+
+    multi.schedule("0 2 * * *", tz="UTC")
+    multi.schedule("0 9 * * 1", tz="America/Chicago")
+
+    key = "sched_test_11.multi"
+    assert len(Registry._global_schedules[key]) == 2
+
+
+def test_operation_remains_hashable_with_schedules() -> None:
+    reg = Registry("sched_test_hash")
+
+    @reg.operation
+    def hashable_op() -> None: ...
+
+    hashable_op.schedule("0 2 * * *", tz="UTC")
+    hashable_op.schedule("0 9 * * 1", tz="America/New_York")
+
+    # frozen dataclass carrying a mutable list must stay hashable (the list is
+    # excluded from eq/hash) so Operations can be used as dict keys / set members.
+    assert hash(hashable_op) is not None
+    assert hashable_op in {hashable_op}
 
 
 def test_validation_does_not_import_worker_or_server() -> None:
@@ -137,10 +193,12 @@ def test_validation_does_not_import_worker_or_server() -> None:
     before_worker = "thrum.jobs.worker" in sys.modules
     before_server = "thrum.jobs.server" in sys.modules
 
-    reg = Registry("sched_test_10")
+    reg = Registry("sched_test_12")
 
-    @reg.operation(schedule="0 2 * * *", timezone="America/Vancouver")
+    @reg.operation
     def check_imports() -> None: ...
+
+    check_imports.schedule("0 2 * * *", tz="America/Vancouver")
 
     if not before_worker:
         assert "thrum.jobs.worker" not in sys.modules

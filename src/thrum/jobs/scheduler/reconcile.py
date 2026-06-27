@@ -16,13 +16,15 @@ if TYPE_CHECKING:
 
 async def assert_declared_schedules(
     session: AsyncSession,
-    declared: dict[str, DeclaredSchedule],
+    declared: dict[str, list[DeclaredSchedule]],
 ) -> int:
     """Persist the declared Schedule set into the `schedules` table.
 
-    Keyed on Task identity (task_namespace, task_name). INSERT … ON CONFLICT
-    DO UPDATE so a changed cron/tz/policy updates in place, a new identity
-    inserts, and a re-declared identity revives its declaration gate.
+    Keyed on Schedule identity (task_namespace, task_name, cron) so an
+    operation may declare several recurrences without them colliding. INSERT …
+    ON CONFLICT DO UPDATE so a changed tz/policy updates the matching
+    recurrence in place, a new recurrence inserts, and a re-declared one
+    revives its declaration gate.
 
     Writes only the declaration gate — never the operational gate (ADR-0022).
     Returns the number of rows upserted.
@@ -31,27 +33,28 @@ async def assert_declared_schedules(
         return 0
 
     rows = []
-    for key, spec in declared.items():
+    for key, specs in declared.items():
         ns, name = key.split(".", 1)
-        rows.append(
-            {
-                "task_namespace": ns,
-                "task_name": name,
-                "cron": spec.cron,
-                "timezone": spec.timezone,
-                "declared_duration": spec.declared_duration,
-                "sla": spec.sla,
-                "start_grace": spec.start_grace,
-                "declaration_active": True,
-                "last_declared_at": func.now(),
-            }
-        )
+        for spec in specs:
+            rows.append(
+                {
+                    "task_namespace": ns,
+                    "task_name": name,
+                    "cron": spec.cron,
+                    "timezone": spec.timezone,
+                    "declared_duration": spec.declared_duration,
+                    "sla": spec.sla,
+                    "start_grace": spec.start_grace,
+                    "declaration_active": True,
+                    "last_declared_at": func.now(),
+                }
+            )
 
     stmt = pg_insert(Schedule).values(rows)
     stmt = stmt.on_conflict_do_update(
-        constraint="uq_schedules_task",
+        constraint="uq_schedules_task_cron",
         set_={
-            "cron": stmt.excluded.cron,
+            # `cron` is part of the conflict key, so it never changes on update.
             "timezone": stmt.excluded.timezone,
             "declared_duration": stmt.excluded.declared_duration,
             "sla": stmt.excluded.sla,
