@@ -22,6 +22,7 @@ build/
 # Project docs not for public release
 docs/prd/
 docs/VISION.md
+docs/roadmap.local.md
 
 # OS / editor cruft
 .DS_Store
