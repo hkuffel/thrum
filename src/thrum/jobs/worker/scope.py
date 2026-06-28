@@ -63,37 +63,46 @@ async def run_scoped(
     caller = Caller.system()
     capabilities = _capability_params(operation.fn, providers)
     failure: str | None = None
-    async with session_factory() as session, AsyncExitStack() as stack:
-        injected = {}
-        ctx = ProviderContext(session=session)
-        # The try covers Provider setup through the commit so a Provider
-        # __aenter__ that raises is recorded as a failed Attempt, not propagated
-        # out of the batch loop. It deliberately ends before the stack unwinds:
-        # a teardown that raises after a committed success must propagate, never
-        # be re-recorded as a failure over the already-`succeeded` Run. Txn 2
-        # nests inside the stack so teardown runs after commit on success and
-        # after rollback on a raised body.
-        try:
-            for name, capability_type in capabilities:
-                injected[name] = await stack.enter_async_context(
-                    providers[capability_type](ctx, caller)
-                )
-            async with session.begin():
-                output = await _invoke(operation.fn, claimed.inputs, injected)
-                ensure_serializable(output, owner=claimed.operation_key, role="output")
-                await record_result(
-                    session,
-                    claimed,
-                    ExecutionResult(AttemptOutcome.succeeded, output, None),
-                    operation,
-                )
-        except SerializationContractError as exc:
-            # A non-serializable output rolled Txn 2 back; fail the Attempt with
-            # the contract error rather than a traceback (Run.output is JSONB; a
-            # raise there would loop the same bad output forever).
-            failure = str(exc)
-        except Exception:
-            failure = traceback.format_exc()
+    try:
+        async with session_factory() as session, AsyncExitStack() as stack:
+            injected = {}
+            ctx = ProviderContext(session=session)
+            # The inner try covers Provider setup through the commit so a
+            # Provider __aenter__ that raises is recorded as a failed Attempt,
+            # not propagated. It ends before the stack unwinds because a teardown
+            # that raises after a committed success must propagate, never be
+            # re-recorded over the already-`succeeded` Run. Txn 2 nests inside
+            # the stack so teardown runs after commit on success and after
+            # rollback on a raised body.
+            try:
+                for name, capability_type in capabilities:
+                    injected[name] = await stack.enter_async_context(
+                        providers[capability_type](ctx, caller)
+                    )
+                async with session.begin():
+                    output = await _invoke(operation.fn, claimed.inputs, injected)
+                    ensure_serializable(output, owner=claimed.operation_key, role="output")
+                    await record_result(
+                        session,
+                        claimed,
+                        ExecutionResult(AttemptOutcome.succeeded, output, None),
+                        operation,
+                    )
+            except SerializationContractError as exc:
+                # A non-serializable output rolled Txn 2 back; fail the Attempt
+                # with the contract error rather than a traceback (Run.output is
+                # JSONB; a raise there would loop the same bad output forever).
+                failure = str(exc)
+            except Exception:
+                failure = traceback.format_exc()
+    except Exception:
+        # A Provider teardown raised during stack unwind. On the success path
+        # (failure is None) the Run already committed `succeeded` — let it
+        # propagate rather than overwrite that record. On the failure path the
+        # outcome is not yet recorded, so swallow it and record the failure
+        # below, keeping the batch loop turning.
+        if failure is None:
+            raise
 
     # The failure-path second transaction runs after Txn 2 has rolled back and
     # the Providers are torn down — isolated, as ADR-0024 requires.

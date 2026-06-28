@@ -207,6 +207,31 @@ async def test_provider_setup_raise_is_recorded_not_propagated(session_factory):
     assert "setup boom" in attempt.error
 
 
+async def test_failure_path_teardown_raise_still_records_failed(session_factory):
+    # A raised body sets the failure before the stack unwinds; a teardown that
+    # also raises must not bury that outcome — the Attempt is still recorded
+    # `failed` and nothing propagates, so the batch loop keeps turning.
+    @asynccontextmanager
+    async def exploding_teardown(ctx, caller):
+        yield Telemetry()
+        raise RuntimeError("teardown boom")
+
+    async def op(*, t: Telemetry) -> dict:
+        raise ValueError("body boom")
+
+    task = Task(fn=op, namespace="probe", name="both_boom")
+    run_id = await _enqueue(session_factory, task.key)
+    item = await _claim_one(session_factory)
+
+    await run_scoped(session_factory, item, {task.key: task}, {Telemetry: exploding_teardown})
+
+    async with session_factory() as session:
+        run = await session.get(Run, run_id)
+        attempt = await session.get(Attempt, item.attempt_id)
+    assert run.status == RunStatus.failed
+    assert "body boom" in attempt.error
+
+
 async def test_provider_teardown_raise_after_commit_preserves_success(session_factory):
     # A Provider teardown that raises after Txn 2 commits must propagate, not be
     # caught and re-recorded as a failure over the already-`succeeded` Run.
