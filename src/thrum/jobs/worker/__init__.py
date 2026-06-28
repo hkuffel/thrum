@@ -60,6 +60,11 @@ async def run_once(
     `app` supplies both the operation and Provider registries. The bare
     `operations` mapping is the no-capability path the lower-level tracer tests
     drive directly; without an App there are no Providers to inject.
+
+    Breaking change (ADR-0024): with neither `app` nor `operations` this no
+    longer falls back to `Registry._global`. Operations resolve to an empty
+    mapping, so every claimed Run is recorded `failed` as unregistered. Pass an
+    App (as `Worker` does) to execute registered Operations.
     """
     if app is not None:
         operations = app.operations

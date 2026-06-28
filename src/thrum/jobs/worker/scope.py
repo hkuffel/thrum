@@ -62,17 +62,20 @@ async def run_scoped(
 
     caller = Caller.system()
     capabilities = _capability_params(operation.fn, providers)
-    try:
-        async with session_factory() as session, AsyncExitStack() as stack:
-            injected = {}
-            ctx = ProviderContext(session=session)
-            for name, capability_type in capabilities:
-                injected[name] = await stack.enter_async_context(
-                    providers[capability_type](ctx, caller)
-                )
-            # Txn 2 nests inside the stack: Providers enter, the transaction
-            # commits, then the stack unwinds — teardown runs after commit on
-            # success and after rollback on a raised body.
+    failure: str | None = None
+    async with session_factory() as session, AsyncExitStack() as stack:
+        injected = {}
+        ctx = ProviderContext(session=session)
+        for name, capability_type in capabilities:
+            injected[name] = await stack.enter_async_context(
+                providers[capability_type](ctx, caller)
+            )
+        # The handler stays inside the stack so it covers only the body and the
+        # commit, not Provider teardown: a teardown that raises after a committed
+        # success must propagate, never be re-recorded as a failure over the
+        # already-`succeeded` Run. Txn 2 nests inside the stack so teardown runs
+        # after commit on success and after rollback on a raised body.
+        try:
             async with session.begin():
                 output = await _invoke(operation.fn, claimed.inputs, injected)
                 ensure_serializable(output, owner=claimed.operation_key, role="output")
@@ -82,13 +85,18 @@ async def run_scoped(
                     ExecutionResult(AttemptOutcome.succeeded, output, None),
                     operation,
                 )
-    except SerializationContractError as exc:
-        # A non-serializable output rolled Txn 2 back; fail the Attempt with the
-        # contract error rather than a traceback (Run.output is JSONB; a raise
-        # there would loop the same bad output forever).
-        await _record_failure(session_factory, claimed, operation, str(exc))
-    except Exception:
-        await _record_failure(session_factory, claimed, operation, traceback.format_exc())
+        except SerializationContractError as exc:
+            # A non-serializable output rolled Txn 2 back; fail the Attempt with
+            # the contract error rather than a traceback (Run.output is JSONB; a
+            # raise there would loop the same bad output forever).
+            failure = str(exc)
+        except Exception:
+            failure = traceback.format_exc()
+
+    # The failure-path second transaction runs after Txn 2 has rolled back and
+    # the Providers are torn down — isolated, as ADR-0024 requires.
+    if failure is not None:
+        await _record_failure(session_factory, claimed, operation, failure)
 
 
 async def _invoke(fn, inputs: dict, injected: dict) -> dict | None:

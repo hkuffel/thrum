@@ -183,6 +183,32 @@ async def test_providers_torn_down_on_failure_path(session_factory):
     assert events == ["enter", "exit"]
 
 
+async def test_provider_teardown_raise_after_commit_preserves_success(session_factory):
+    # A Provider teardown that raises after Txn 2 commits must propagate, not be
+    # caught and re-recorded as a failure over the already-`succeeded` Run.
+    @asynccontextmanager
+    async def exploding(ctx, caller):
+        yield Telemetry()
+        raise RuntimeError("teardown boom")
+
+    async def op(*, t: Telemetry) -> dict:
+        return {"ok": True}
+
+    task = Task(fn=op, namespace="probe", name="ok_teardown")
+    run_id = await _enqueue(session_factory, task.key)
+    item = await _claim_one(session_factory)
+
+    with pytest.raises(RuntimeError, match="teardown boom"):
+        await run_scoped(session_factory, item, {task.key: task}, {Telemetry: exploding})
+
+    async with session_factory() as session:
+        run = await session.get(Run, run_id)
+        attempt = await session.get(Attempt, item.attempt_id)
+    assert run.status == RunStatus.succeeded
+    assert run.output == {"ok": True}
+    assert attempt.outcome == AttemptOutcome.succeeded
+
+
 # Crash before commit: a worker death mid-Txn-2 lands nothing; the Reaper recovers
 
 async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
