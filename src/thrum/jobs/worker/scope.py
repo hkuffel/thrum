@@ -81,15 +81,12 @@ async def run_scoped(
                         providers[capability_type](ctx, caller)
                     )
                 async with session.begin():
-                    recorder = EffectRecorder()
-                    recorder.attach((await session.connection()).sync_connection)
-                    try:
+                    async with EffectRecorder.observing(session) as recorder:
                         output = await _invoke(operation.fn, claimed.inputs, injected)
                         # Force the body's pending ORM writes through the recorder
-                        # before it detaches; raw executes already fired.
+                        # before the block exits and detaches; raw executes already
+                        # fired.
                         await session.flush()
-                    finally:
-                        recorder.detach()
                     ensure_serializable(output, owner=claimed.operation_key, role="output")
                     await recorder.write(session, claimed.attempt_id)
                     await record_result(

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Delete, Insert, Update, event, func, select
@@ -48,18 +50,29 @@ class EffectRecorder:
     writes them as one Effect row per (table, kind) for the Attempt."""
 
     def __init__(self) -> None:
-        self._counts: dict[tuple[str, EffectKind], int] = {}
+        self._counts: Counter[tuple[str, EffectKind]] = Counter()
         self._conn: Connection | None = None
 
-    def attach(self, sync_conn: Connection) -> None:
-        """Listen on the execution connection. Idempotently swallows every
-        observation so a parse or listener fault can never abort Txn 2."""
+    @classmethod
+    @asynccontextmanager
+    async def observing(cls, session: AsyncSession):
+        """Record mutations on `session`'s connection for the duration of the
+        block, detaching on exit. Exit must precede the framework's own writes
+        (the Effect rows, the Attempt and Run records) so they are never counted
+        as the Operation's Effects — the `with` scope makes that ordering
+        structural."""
+        recorder = cls()
+        recorder._attach((await session.connection()).sync_connection)
+        try:
+            yield recorder
+        finally:
+            recorder._detach()
+
+    def _attach(self, sync_conn: Connection) -> None:
         self._conn = sync_conn
         event.listen(sync_conn, "after_execute", self._after_execute)
 
-    def detach(self) -> None:
-        """Stop listening so the framework's own writes (Effect rows, the Attempt
-        and Run records) are never counted as the Operation's Effects."""
+    def _detach(self) -> None:
         if self._conn is not None:
             event.remove(self._conn, "after_execute", self._after_execute)
             self._conn = None
@@ -73,7 +86,7 @@ class EffectRecorder:
             rows = result.rowcount
             if rows is None or rows < 0:
                 return
-            self._counts[(table, kind)] = self._counts.get((table, kind), 0) + rows
+            self._counts[(table, kind)] += rows
         except Exception:
             log.exception("Effect recorder failed to observe a statement; skipping it")
 
