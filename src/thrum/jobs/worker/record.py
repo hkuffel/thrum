@@ -25,7 +25,7 @@ from thrum.jobs.retry import RetryPolicy, backoff_delay
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from thrum.jobs.registry import Task
+    from thrum.jobs.registry import Operation
     from thrum.jobs.worker.claim import ClaimedRun
     from thrum.jobs.worker.execute import ExecutionResult
 
@@ -43,7 +43,7 @@ async def record_result(
     session: AsyncSession,
     claimed: ClaimedRun,
     result: ExecutionResult,
-    operation: Task | None = None,
+    operation: Operation | None = None,
 ) -> None:
     """Close the Attempt with its outcome, then move the Run to its next state:
     `succeeded`, a backed-off `pending` retry, or terminal `failed` once the budget

@@ -13,9 +13,9 @@ import datetime as dt
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from factories import make_operation
 from thrum.jobs import db_provider, enqueue
 from thrum.jobs.models import Attempt, AttemptOutcome, Effect, EffectKind, Run, RunStatus
-from thrum.jobs.registry import Task
 from thrum.jobs.worker import effects as effects_module
 from thrum.jobs.worker.claim import claim_runs
 from thrum.jobs.worker.effects import is_zero_effect
@@ -70,10 +70,10 @@ async def test_batch_yields_one_effect_with_row_count(session_factory):
         )
         return {}
 
-    task = Task(fn=batch, namespace="effect", name="batch")
-    await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=batch, namespace="effect", name="batch")
+    await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
-    await run_scoped(session_factory, item, {task.key: task}, DB)
+    await run_scoped(session_factory, item, {operation.key: operation}, DB)
 
     rows = await _effects(session_factory, item.attempt_id)
     assert len(rows) == 1
@@ -92,10 +92,10 @@ async def test_kinds_and_multiple_tables(session_factory):
         await db.execute(text("DELETE FROM effect_probe_b"))
         return {}
 
-    task = Task(fn=mutate, namespace="effect", name="mutate")
-    await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=mutate, namespace="effect", name="mutate")
+    await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
-    await run_scoped(session_factory, item, {task.key: task}, DB)
+    await run_scoped(session_factory, item, {operation.key: operation}, DB)
 
     rows = await _effects(session_factory, item.attempt_id)
     recorded = {(r.table_name, r.kind): r.row_count for r in rows}
@@ -115,10 +115,10 @@ async def test_dml_with_leading_comments_is_still_classified(session_factory):
         await db.execute(text("/* hint */ UPDATE effect_probe SET note = 'b'"))
         return {}
 
-    task = Task(fn=commented, namespace="effect", name="commented")
-    await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=commented, namespace="effect", name="commented")
+    await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
-    await run_scoped(session_factory, item, {task.key: task}, DB)
+    await run_scoped(session_factory, item, {operation.key: operation}, DB)
 
     rows = await _effects(session_factory, item.attempt_id)
     assert {(r.table_name, r.kind): r.row_count for r in rows} == {
@@ -134,10 +134,10 @@ async def test_success_commits_effects_records_and_attempt_atomically(session_fa
         await db.execute(text("INSERT INTO effect_probe (note) VALUES ('one')"))
         return {"ok": True}
 
-    task = Task(fn=writer, namespace="effect", name="writer")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=writer, namespace="effect", name="writer")
+    run_id = await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
-    await run_scoped(session_factory, item, {task.key: task}, DB)
+    await run_scoped(session_factory, item, {operation.key: operation}, DB)
 
     async with session_factory() as session:
         probe = (await session.execute(text("SELECT count(*) FROM effect_probe"))).scalar_one()
@@ -163,10 +163,10 @@ async def test_recorder_listener_raise_does_not_roll_back_effects(session_factor
         await db.execute(text("INSERT INTO effect_probe (note) VALUES ('survives')"))
         return {"ok": True}
 
-    task = Task(fn=writer, namespace="effect", name="resilient")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=writer, namespace="effect", name="resilient")
+    run_id = await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
-    await run_scoped(session_factory, item, {task.key: task}, DB)
+    await run_scoped(session_factory, item, {operation.key: operation}, DB)
 
     async with session_factory() as session:
         probe = (await session.execute(text("SELECT count(*) FROM effect_probe"))).scalar_one()
@@ -186,11 +186,11 @@ async def test_failed_then_retried_attributes_effects_to_the_retry(session_facto
             raise ValueError("first try fails")
         return {"ok": True}
 
-    task = Task(fn=flaky, namespace="effect", name="flaky", max_attempts=2)
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=flaky, namespace="effect", name="flaky", max_attempts=2)
+    run_id = await _enqueue(session_factory, operation.key)
 
     first = await _claim_one(session_factory)
-    await run_scoped(session_factory, first, {task.key: task}, DB)
+    await run_scoped(session_factory, first, {operation.key: operation}, DB)
 
     # The retry is gated behind next_attempt_at; clear it so it claims now.
     async with session_factory() as session, session.begin():
@@ -199,7 +199,7 @@ async def test_failed_then_retried_attributes_effects_to_the_retry(session_facto
         )
     state["fail"] = False
     second = await _claim_one(session_factory)
-    await run_scoped(session_factory, second, {task.key: task}, DB)
+    await run_scoped(session_factory, second, {operation.key: operation}, DB)
 
     assert await _effects(session_factory, first.attempt_id) == []
     retry_effects = await _effects(session_factory, second.attempt_id)
@@ -218,17 +218,17 @@ async def test_zero_effect_flag_is_derived_and_leaves_status_unchanged(session_f
         await db.execute(text("INSERT INTO effect_probe (note) VALUES ('something')"))
         return {}
 
-    noop_task = Task(fn=noop, namespace="effect", name="noop")
-    writer_task = Task(fn=writer, namespace="effect", name="did_work")
-    tasks = {noop_task.key: noop_task, writer_task.key: writer_task}
+    noop_op = make_operation(fn=noop, namespace="effect", name="noop")
+    writer_op = make_operation(fn=writer, namespace="effect", name="did_work")
+    operations = {noop_op.key: noop_op, writer_op.key: writer_op}
 
-    noop_run = await _enqueue(session_factory, noop_task.key)
+    noop_run = await _enqueue(session_factory, noop_op.key)
     noop_item = await _claim_one(session_factory)
-    await run_scoped(session_factory, noop_item, tasks, DB)
+    await run_scoped(session_factory, noop_item, operations, DB)
 
-    writer_run = await _enqueue(session_factory, writer_task.key)
+    writer_run = await _enqueue(session_factory, writer_op.key)
     writer_item = await _claim_one(session_factory)
-    await run_scoped(session_factory, writer_item, tasks, DB)
+    await run_scoped(session_factory, writer_item, operations, DB)
 
     async with session_factory() as session:
         assert await is_zero_effect(session, noop_item.attempt_id) is True

@@ -13,9 +13,9 @@ import datetime as dt
 
 from sqlalchemy import func, select
 
+from factories import make_operation
 from thrum.jobs.config import SchedulerConfig
 from thrum.jobs.models import Attempt, AttemptOutcome, Run, RunStatus, Schedule, Trigger
-from thrum.jobs.registry import Task
 from thrum.jobs.scheduler import Scheduler
 from thrum.jobs.scheduler.materialize import (
     expand_local,
@@ -125,7 +125,7 @@ async def test_operational_gate_paused_materializes_nothing(session_factory):
         session_factory,
         cron="0 * * * *",
         timezone="UTC",
-        operation_name="op_paused_task",
+        operation_name="op_paused",
         declaration_active=True,
         operationally_paused_at=dt.datetime.now(dt.UTC),
         operationally_paused_by="admin",
@@ -142,7 +142,7 @@ async def test_both_gates_active_materializes(session_factory):
         session_factory,
         cron="0 * * * *",
         timezone="UTC",
-        operation_name="both_active_task",
+        operation_name="op_both_active",
         declaration_active=True,
     )
 
@@ -309,7 +309,7 @@ async def test_e2e_schedule_materializes_claims_and_succeeds(session_factory):
     def send():
         return {"sent": True}
 
-    task = Task(fn=send, namespace="billing", name="send_receipts")
+    operation = make_operation(fn=send, namespace="billing", name="send_receipts")
     # A cron that always has a due occurrence in the recent past: every minute.
     await _add_schedule(session_factory, cron="* * * * *", timezone="UTC")
 
@@ -328,7 +328,7 @@ async def test_e2e_schedule_materializes_claims_and_succeeds(session_factory):
         target_id = earliest.id
 
     processed = await run_once(
-        session_factory, "worker-live", 10, LEASE, operations={task.key: task}
+        session_factory, "worker-live", 10, LEASE, operations={operation.key: operation}
     )
     assert processed == 1
     async with session_factory() as session:

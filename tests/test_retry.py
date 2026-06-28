@@ -12,9 +12,10 @@ import datetime as dt
 
 from sqlalchemy import func, select
 
+from factories import make_operation
 from thrum.jobs import enqueue
 from thrum.jobs.models import Attempt, AttemptOutcome, Run, RunStatus
-from thrum.jobs.registry import Task
+from thrum.jobs.registry import Operation
 from thrum.jobs.retry import RetryPolicy, backoff_delay
 from thrum.jobs.worker import run_once
 from thrum.jobs.worker.claim import claim_runs
@@ -40,11 +41,11 @@ async def _claim_one(session_factory, worker_id="worker-1"):
         return (await claim_runs(session, worker_id, 10, LEASE))[0]
 
 
-async def _fail(session_factory, item, task):
-    """Record a Task-attributable failure for `item` under `task`'s policy."""
+async def _fail(session_factory, item, operation):
+    """Record an Operation-attributable failure for `item` under `operation`'s policy."""
     async with session_factory() as session, session.begin():
         await record_result(
-            session, item, ExecutionResult(AttemptOutcome.failed, None, "boom"), task
+            session, item, ExecutionResult(AttemptOutcome.failed, None, "boom"), operation
         )
 
 
@@ -91,13 +92,15 @@ def test_retry_policy_defaults_are_the_beachhead():
 # The budget decision in Record (real DB)
 
 async def test_failure_with_budget_remaining_requeues_with_backoff(session_factory):
-    """A failing Task with budget left returns to `pending` with a future
+    """A failing Operation with budget left returns to `pending` with a future
     next_attempt_at — the Run loops (ADR-0013) rather than failing terminally."""
-    task = Task(fn=lambda: None, namespace="billing", name="send_receipts", max_attempts=3)
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(
+        fn=lambda: None, namespace="billing", name="send_receipts", max_attempts=3
+    )
+    run_id = await _enqueue(session_factory, operation.key)
 
     item = await _claim_one(session_factory)
-    await _fail(session_factory, item, task)
+    await _fail(session_factory, item, operation)
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -111,11 +114,11 @@ async def test_failure_with_budget_remaining_requeues_with_backoff(session_facto
 
 
 async def test_budget_exhaustion_sets_run_failed(session_factory):
-    """The Run goes terminal `failed` only once max_attempts Task-attributable
+    """The Run goes terminal `failed` only once max_attempts Operation-attributable
     Attempts are spent — not before."""
     # Zero backoff so the retry is immediately re-claimable (the backoff envelope
     # is covered by the pure tests + test_failure_with_budget_remaining_*).
-    task = Task(
+    operation = make_operation(
         fn=lambda: None,
         namespace="billing",
         name="send_receipts",
@@ -123,15 +126,15 @@ async def test_budget_exhaustion_sets_run_failed(session_factory):
         retry_initial_delay=0.0,
         retry_jitter=False,
     )
-    run_id = await _enqueue(session_factory, task.key)
+    run_id = await _enqueue(session_factory, operation.key)
 
     item1 = await _claim_one(session_factory)
-    await _fail(session_factory, item1, task)
+    await _fail(session_factory, item1, operation)
     async with session_factory() as session:  # still retrying after 1/2
         assert (await session.get(Run, run_id)).status == RunStatus.pending
 
     item2 = await _claim_one(session_factory)
-    await _fail(session_factory, item2, task)
+    await _fail(session_factory, item2, operation)
     async with session_factory() as session:  # budget spent after 2/2
         run = await session.get(Run, run_id)
         assert run.status == RunStatus.failed
@@ -145,11 +148,11 @@ async def test_budget_exhaustion_sets_run_failed(session_factory):
 
 async def test_default_single_attempt_is_terminal_on_first_failure(session_factory):
     """max_attempts=1 (the default) keeps the old behavior: one raise → failed."""
-    task = Task(fn=lambda: None, namespace="billing", name="send_receipts")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=lambda: None, namespace="billing", name="send_receipts")
+    run_id = await _enqueue(session_factory, operation.key)
 
     item = await _claim_one(session_factory)
-    await _fail(session_factory, item, task)
+    await _fail(session_factory, item, operation)
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -158,10 +161,10 @@ async def test_default_single_attempt_is_terminal_on_first_failure(session_facto
 
 
 async def test_abandoned_attempt_does_not_spend_budget(session_factory):
-    """ADR-0020: a reaped (`abandoned`) Attempt — a Worker death, not a Task
+    """ADR-0020: a reaped (`abandoned`) Attempt — a Worker death, not an Operation
     failure — must not count toward the budget, so a max_attempts=2 Run with one
     abandoned + one failed Attempt is still retried, not failed."""
-    task = Task(
+    operation = make_operation(
         fn=lambda: None,
         namespace="billing",
         name="send_receipts",
@@ -169,7 +172,7 @@ async def test_abandoned_attempt_does_not_spend_budget(session_factory):
         retry_initial_delay=0.0,
         retry_jitter=False,
     )
-    run_id = await _enqueue(session_factory, task.key)
+    run_id = await _enqueue(session_factory, operation.key)
 
     # First claim is "killed": close its Attempt `abandoned` and requeue, exactly
     # as the Reaper would (no budget consumed).
@@ -181,9 +184,9 @@ async def test_abandoned_attempt_does_not_spend_budget(session_factory):
         run = await session.get(Run, run_id)
         run.status = RunStatus.pending
 
-    # Now a genuine Task failure (the first one that counts) under max_attempts=2.
+    # Now a genuine Operation failure (the first one that counts) under max_attempts=2.
     item2 = await _claim_one(session_factory)
-    await _fail(session_factory, item2, task)
+    await _fail(session_factory, item2, operation)
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -192,10 +195,10 @@ async def test_abandoned_attempt_does_not_spend_budget(session_factory):
         assert run.status == RunStatus.pending
 
 
-async def test_unresolved_task_is_terminal_not_retried(session_factory):
-    """An unresolved Task (None policy) is non-retryable: terminal `failed`,
+async def test_unresolved_operation_is_terminal_not_retried(session_factory):
+    """An unresolved Operation (None policy) is non-retryable: terminal `failed`,
     surfacing the misconfiguration instead of hot-looping (ADR-0021)."""
-    run_id = await _enqueue(session_factory, "ghost.task")
+    run_id = await _enqueue(session_factory, "ghost.operation")
     item = await _claim_one(session_factory)
 
     async with session_factory() as session, session.begin():
@@ -211,8 +214,8 @@ async def test_unresolved_task_is_terminal_not_retried(session_factory):
 
 # End-to-end through run_once (real DB)
 
-def _flaky_task(fails: int) -> Task:
-    """A Task that raises its first `fails` invocations, then returns. Backoff is
+def _flaky_operation(fails: int) -> Operation:
+    """An Operation that raises its first `fails` invocations, then returns. Backoff is
     zeroed (initial_delay=0, jitter off) so each retry is immediately claimable,
     keeping the e2e fast and deterministic."""
     state = {"n": 0}
@@ -223,7 +226,7 @@ def _flaky_task(fails: int) -> Task:
             raise ValueError("transient")
         return {"ok": state["n"]}
 
-    return Task(
+    return make_operation(
         fn=fn,
         namespace="billing",
         name="flaky",
@@ -233,10 +236,10 @@ def _flaky_task(fails: int) -> Task:
     )
 
 
-async def test_e2e_task_succeeds_after_two_retries(session_factory):
-    task = _flaky_task(fails=2)
-    run_id = await _enqueue(session_factory, task.key)
-    operations = {task.key: task}
+async def test_e2e_operation_succeeds_after_two_retries(session_factory):
+    operation = _flaky_operation(fails=2)
+    run_id = await _enqueue(session_factory, operation.key)
+    operations = {operation.key: operation}
 
     for _ in range(3):  # fail, fail, succeed
         await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
@@ -259,11 +262,11 @@ async def test_e2e_task_succeeds_after_two_retries(session_factory):
     ]
 
 
-async def test_e2e_always_failing_task_exhausts_budget(session_factory):
+async def test_e2e_always_failing_operation_exhausts_budget(session_factory):
     def boom():
         raise ValueError("always")
 
-    task = Task(
+    operation = make_operation(
         fn=boom,
         namespace="billing",
         name="doomed",
@@ -271,8 +274,8 @@ async def test_e2e_always_failing_task_exhausts_budget(session_factory):
         retry_initial_delay=0.0,
         retry_jitter=False,
     )
-    run_id = await _enqueue(session_factory, task.key)
-    operations = {task.key: task}
+    run_id = await _enqueue(session_factory, operation.key)
+    operations = {operation.key: operation}
 
     await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
     await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)

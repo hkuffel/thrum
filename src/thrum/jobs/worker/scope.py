@@ -37,14 +37,14 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from thrum.jobs.providers import Provider
-    from thrum.jobs.registry import Task
+    from thrum.jobs.registry import Operation
     from thrum.jobs.worker.claim import ClaimedRun
 
 
 async def run_scoped(
     session_factory: async_sessionmaker,
     claimed: ClaimedRun,
-    operations: dict[str, Task],
+    operations: dict[str, Operation],
     providers: dict[type, Provider],
 ) -> None:
     """Execute one claimed Run inside the Scope's transaction. An unresolved
@@ -145,7 +145,7 @@ def _capability_params(fn, providers: dict[type, Provider]) -> list[tuple[str, t
 async def _record_failure(
     session_factory: async_sessionmaker,
     claimed: ClaimedRun,
-    operation: Task | None,
+    operation: Operation | None,
     error: str,
 ) -> None:
     """The failure-path second transaction (today's `record.py`): close the

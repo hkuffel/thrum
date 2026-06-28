@@ -12,9 +12,9 @@ import datetime as dt
 
 from sqlalchemy import func, select, update
 
+from factories import make_operation
 from thrum.jobs import enqueue
 from thrum.jobs.models import Attempt, AttemptOutcome, Run, RunStatus
-from thrum.jobs.registry import Task
 from thrum.jobs.scheduler.election import release_sweep_lock, try_acquire_sweep_lock
 from thrum.jobs.scheduler.reaper import reap_orphans
 from thrum.jobs.worker.claim import claim_runs
@@ -193,8 +193,8 @@ async def test_e2e_dead_worker_orphan_is_reaped_and_rerun(session_factory):
     def send(invoice_id):
         return {"emailed": invoice_id}
 
-    task = Task(fn=send, namespace="billing", name="send_receipts")
-    run_id = await _enqueue(session_factory, task.key, invoice_id=7)
+    operation = make_operation(fn=send, namespace="billing", name="send_receipts")
+    run_id = await _enqueue(session_factory, operation.key, invoice_id=7)
 
     # Claim opens an Attempt + stamps a lease, then the Worker "dies": nothing
     # renews the lease, so we force it into the past.
@@ -218,7 +218,7 @@ async def test_e2e_dead_worker_orphan_is_reaped_and_rerun(session_factory):
     from thrum.jobs.worker import run_once
 
     processed = await run_once(
-        session_factory, "worker-live", 10, LEASE, operations={task.key: task}
+        session_factory, "worker-live", 10, LEASE, operations={operation.key: operation}
     )
     assert processed == 1
     async with session_factory() as session:

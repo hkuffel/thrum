@@ -13,9 +13,9 @@ import datetime as dt
 
 from sqlalchemy import select
 
+from factories import make_operation
 from thrum.jobs import enqueue
 from thrum.jobs.models import Attempt, AttemptOutcome, Run, RunStatus
-from thrum.jobs.registry import Task
 from thrum.jobs.worker import run_once
 from thrum.jobs.worker.claim import claim_runs
 from thrum.jobs.worker.execute import ExecutionResult
@@ -130,10 +130,12 @@ async def test_e2e_enqueue_runs_to_succeeded(session_factory):
     def send(invoice_id):
         return {"emailed": invoice_id}
 
-    task = Task(fn=send, namespace="billing", name="send_receipts")
-    run_id = await _enqueue(session_factory, task.key, invoice_id=7)
+    operation = make_operation(fn=send, namespace="billing", name="send_receipts")
+    run_id = await _enqueue(session_factory, operation.key, invoice_id=7)
 
-    processed = await run_once(session_factory, "worker-1", 10, LEASE, operations={task.key: task})
+    processed = await run_once(
+        session_factory, "worker-1", 10, LEASE, operations={operation.key: operation}
+    )
 
     assert processed == 1
     async with session_factory() as session:
@@ -146,14 +148,16 @@ async def test_e2e_enqueue_runs_to_succeeded(session_factory):
         assert attempt.outcome == AttemptOutcome.succeeded
 
 
-async def test_e2e_raising_task_records_failed(session_factory):
+async def test_e2e_raising_operation_records_failed(session_factory):
     def boom():
         raise ValueError("nope")
 
-    task = Task(fn=boom, namespace="billing", name="broken")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=boom, namespace="billing", name="broken")
+    run_id = await _enqueue(session_factory, operation.key)
 
-    processed = await run_once(session_factory, "worker-1", 10, LEASE, operations={task.key: task})
+    processed = await run_once(
+        session_factory, "worker-1", 10, LEASE, operations={operation.key: operation}
+    )
 
     assert processed == 1
     async with session_factory() as session:
