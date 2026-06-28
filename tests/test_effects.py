@@ -107,6 +107,26 @@ async def test_kinds_and_multiple_tables(session_factory):
     }
 
 
+async def test_dml_with_leading_comments_is_still_classified(session_factory):
+    await _reset_probes(session_factory)
+
+    async def commented(*, db: AsyncSession) -> dict:
+        await db.execute(text("-- audit note\nINSERT INTO effect_probe (note) VALUES ('a')"))
+        await db.execute(text("/* hint */ UPDATE effect_probe SET note = 'b'"))
+        return {}
+
+    task = Task(fn=commented, namespace="effect", name="commented")
+    await _enqueue(session_factory, task.key)
+    item = await _claim_one(session_factory)
+    await run_scoped(session_factory, item, {task.key: task}, DB)
+
+    rows = await _effects(session_factory, item.attempt_id)
+    assert {(r.table_name, r.kind): r.row_count for r in rows} == {
+        ("effect_probe", EffectKind.insert): 1,
+        ("effect_probe", EffectKind.update): 1,
+    }
+
+
 async def test_success_commits_effects_records_and_attempt_atomically(session_factory):
     await _reset_probes(session_factory)
 

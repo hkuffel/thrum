@@ -39,10 +39,14 @@ log = logging.getLogger(__name__)
 # Raw textual DML (the tests' `text("INSERT ...")`, hand-written statements) carries
 # no parse tree, so the verb and target are recovered from the SQL prefix.
 _TEXT_DML = (
-    (EffectKind.insert, re.compile(r"^\s*INSERT\s+INTO\s+([^\s(]+)", re.IGNORECASE)),
-    (EffectKind.update, re.compile(r"^\s*UPDATE\s+(?:ONLY\s+)?([^\s(]+)", re.IGNORECASE)),
-    (EffectKind.delete, re.compile(r"^\s*DELETE\s+FROM\s+(?:ONLY\s+)?([^\s(]+)", re.IGNORECASE)),
+    (EffectKind.insert, re.compile(r"^INSERT\s+INTO\s+([^\s(]+)", re.IGNORECASE)),
+    (EffectKind.update, re.compile(r"^UPDATE\s+(?:ONLY\s+)?([^\s(]+)", re.IGNORECASE)),
+    (EffectKind.delete, re.compile(r"^DELETE\s+FROM\s+(?:ONLY\s+)?([^\s(]+)", re.IGNORECASE)),
 )
+
+# Leading whitespace and SQL comments before the verb, so `-- note\nINSERT …` and
+# `/* hint */ UPDATE …` still classify rather than silently miss.
+_LEADING_NOISE = re.compile(r"^(?:\s+|--[^\n]*|/\*.*?\*/)+", re.DOTALL)
 
 
 class EffectRecorder:
@@ -120,8 +124,9 @@ def _classify(clauseelement) -> tuple[EffectKind, str] | None:
     if isinstance(clauseelement, Delete):
         return EffectKind.delete, clauseelement.table.name
     if isinstance(clauseelement, TextClause):
+        sql = _LEADING_NOISE.sub("", clauseelement.text)
         for kind, pattern in _TEXT_DML:
-            match = pattern.match(clauseelement.text)
+            match = pattern.match(sql)
             if match is not None:
                 return kind, _bare_name(match.group(1))
     return None
@@ -136,13 +141,19 @@ def _bare_name(token: str) -> str:
 async def is_zero_effect(session: AsyncSession, attempt_id: uuid.UUID) -> bool:
     """The derived Zero-Effect flag: a `succeeded` Attempt that committed no
     Effects. Computed from the Effect count, never stored as a status (ADR-0024) —
-    a legitimate no-op stays `succeeded` and is merely flagged."""
-    attempt = await session.get(Attempt, attempt_id)
-    if attempt is None or attempt.outcome != AttemptOutcome.succeeded:
-        return False
-    count = (
+    a legitimate no-op stays `succeeded` and is merely flagged.
+
+    One outer-joined query, so the result reflects committed state rather than a
+    possibly-stale Attempt cached in the session's identity map."""
+    row = (
         await session.execute(
-            select(func.count()).select_from(Effect).where(Effect.attempt_id == attempt_id)
+            select(Attempt.outcome, func.count(Effect.id))
+            .outerjoin(Effect, Effect.attempt_id == Attempt.id)
+            .where(Attempt.id == attempt_id)
+            .group_by(Attempt.outcome)
         )
-    ).scalar_one()
-    return count == 0
+    ).first()
+    if row is None:
+        return False
+    outcome, count = row
+    return outcome == AttemptOutcome.succeeded and count == 0
