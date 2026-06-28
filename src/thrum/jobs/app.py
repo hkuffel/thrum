@@ -68,6 +68,12 @@ class App:
         self._providers[capability_type] = provider
 
     @property
+    def providers(self) -> dict[type, Any]:
+        """The registered Providers keyed by Capability type — what the
+        Execution Scope resolves keyword-only params against (ADR-0024)."""
+        return dict(self._providers)
+
+    @property
     def operations(self) -> dict[str, Operation]:
         """The Operations this App finalizes — the scoped registry's, or the
         process-global view when unscoped."""

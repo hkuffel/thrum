@@ -26,18 +26,19 @@ import socket
 import uuid
 from typing import TYPE_CHECKING
 
+from thrum.jobs.app import App
 from thrum.jobs.config import SchedulerConfig, WorkerConfig
 from thrum.jobs.registry import Registry
 from thrum.jobs.worker.claim import claim_runs
-from thrum.jobs.worker.execute import execute_run
 from thrum.jobs.worker.heartbeat import renew_leases
-from thrum.jobs.worker.record import record_result
+from thrum.jobs.worker.scope import run_scoped
 
 if TYPE_CHECKING:
     import datetime as dt
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
+    from thrum.jobs.providers import Provider
     from thrum.jobs.registry import Task
 
 
@@ -47,40 +48,42 @@ async def run_once(
     limit: int,
     lease_ttl: dt.timedelta,
     operations: dict[str, Task] | None = None,
+    *,
+    app: App | None = None,
 ) -> int:
-    """One claim → execute → record pass. Returns the number of Runs processed.
+    """One claim → scope.run pass. Returns the number of Runs processed.
 
-    Claim commits (releasing row locks) before any Operation executes; each Run's
-    result is then recorded in its own transaction. The testable seam beneath
-    `Worker.run`.
+    Claim commits in Txn 1 (releasing row locks) before any Operation executes;
+    the Execution Scope then runs each Run in Txn 2 with injected Capabilities
+    and records its outcome (ADR-0024). The testable seam beneath `Worker.run`.
 
-    This three-transaction shape (claim | execute | record) is the seam for the
-    single-transaction injected-session execution model (ADR-0024), which
-    collapses execute + effect-recording + record into one transaction with a
-    framework-built session. See `worker/execute.py`. Not yet implemented.
+    `app` supplies both the operation and Provider registries. The bare
+    `operations` mapping is the no-capability path the lower-level tracer tests
+    drive directly; without an App there are no Providers to inject.
     """
-    if operations is None:
-        operations = Registry._global
+    if app is not None:
+        operations = app.operations
+        providers: dict[type, Provider] = app.providers
+    else:
+        operations = operations or {}
+        providers = {}
 
-    async with session_factory() as session:
-        async with session.begin():
-            claimed = await claim_runs(session, worker_id, limit, lease_ttl)
+    async with session_factory() as session, session.begin():
+        claimed = await claim_runs(session, worker_id, limit, lease_ttl)
 
     for item in claimed:
-        result = await execute_run(item, operations)
-        async with session_factory() as session:
-            async with session.begin():
-                # Record needs the Operation's retry policy to decide
-                # retry-vs-terminal (ADR-0021); an unresolved Operation (None) is
-                # non-retryable.
-                await record_result(session, item, result, operations.get(item.operation_key))
+        await run_scoped(session_factory, item, operations, providers)
 
     return len(claimed)
 
 
 class Worker:
-    def __init__(self, config: WorkerConfig) -> None:
+    def __init__(self, config: WorkerConfig, app: App | None = None) -> None:
         self.config = config
+        # The Worker is handed the App that owns the operation + Provider
+        # registries; an unscoped default discovers the process-global registry
+        # (ADR-0024). compile() at boot resolves Capabilities against it.
+        self.app = app if app is not None else App()
         self.id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self._draining = False
         self._stop: asyncio.Event | None = None
@@ -110,7 +113,7 @@ class Worker:
         hb_factory = async_sessionmaker(hb_engine, expire_on_commit=False)
         sweep_factory = async_sessionmaker(exec_engine, expire_on_commit=False)
 
-        await self._assert_schedules(exec_factory)
+        await self._boot(exec_factory)
 
         heartbeat = asyncio.create_task(self._heartbeat_loop(hb_factory))
         sweeper = asyncio.create_task(self._sweep_loop(leader_engine, sweep_factory))
@@ -121,6 +124,7 @@ class Worker:
                     self.id,
                     self.config.max_in_flight,
                     self.config.lease_ttl,
+                    app=self.app,
                 )
                 if processed == 0:
                     await self._sleep(self.config.poll_interval)
@@ -130,6 +134,15 @@ class Worker:
             await exec_engine.dispose()
             await hb_engine.dispose()
             await leader_engine.dispose()
+
+    async def _boot(self, session_factory: async_sessionmaker) -> None:
+        """Phase-two validation + schedule reconcile, before the first claim.
+        `app.compile()` resolves Capabilities and fails fast on an unresolvable
+        one, subsuming the schedule-assertion fail-fast slot (ADR-0024); the
+        claim loop must not start until it succeeds. The schedule reconcile then
+        writes declared schedules."""
+        self.app.compile()
+        await self._assert_schedules(session_factory)
 
     async def _assert_schedules(self, session_factory: async_sessionmaker) -> None:
         from thrum.jobs.scheduler.reconcile import assert_declared_schedules

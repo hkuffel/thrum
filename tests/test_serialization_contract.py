@@ -3,31 +3,27 @@
 The static lint (`is_serializable_annotation`, exercised through `app.compile()`)
 is covered in `test_app_compile.py`. This file covers the runtime value-level
 guard: the same `ensure_serializable` check fires at the queue's input boundary
-(`enqueue`) and the worker's output boundary (`execute_run`), so a live object
-crossing either fails with one clear, contract-pointing error rather than a
-cryptic encoder failure deeper in the transport.
+(`enqueue`), so a live object crossing it fails with one clear, contract-pointing
+error rather than a cryptic encoder failure deeper in the transport. The output
+boundary is now the Execution Scope's in-transaction check (test_scope.py).
 
-Both boundaries are reached without Postgres — the input guard raises before the
-session is touched, and execute is pure.
+The input boundary is reached without Postgres — the guard raises before the
+session is touched.
 """
 
 from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from uuid import uuid4
 
 import pytest
 
 from thrum.jobs.enqueue import enqueue
-from thrum.jobs.models import AttemptOutcome
 from thrum.jobs.serialization import (
     SerializationContractError,
     ensure_serializable,
     is_serializable_annotation,
 )
-from thrum.jobs.worker.claim import ClaimedRun
-from thrum.jobs.worker.execute import execute_run
 
 
 class Customer:
@@ -94,40 +90,6 @@ def test_enqueue_accepts_serializable_input_up_to_the_db(monkeypatch) -> None:
     run = enqueue(session, "billing.charge", customer_id=7)
     assert session.added == [run]
     assert run.inputs == {"customer_id": 7}
-
-
-# Output boundary: execute fails the Attempt on a non-serializable output
-
-async def test_execute_fails_attempt_on_non_serializable_output() -> None:
-    from thrum.jobs.registry import Task
-
-    def build():
-        return {"customer": Customer()}
-
-    task = Task(fn=build, namespace="billing", name="build")
-    claimed = ClaimedRun(uuid4(), uuid4(), "billing.build", {})
-
-    result = await execute_run(claimed, {task.key: task})
-
-    assert result.outcome == AttemptOutcome.failed
-    assert result.output is None
-    assert "output.customer is not JSON-serializable" in result.error
-    assert "ADR-0006" in result.error
-
-
-async def test_execute_succeeds_on_serializable_output() -> None:
-    from thrum.jobs.registry import Task
-
-    def build():
-        return {"customer_id": 7}
-
-    task = Task(fn=build, namespace="billing", name="build")
-    claimed = ClaimedRun(uuid4(), uuid4(), "billing.build", {})
-
-    result = await execute_run(claimed, {task.key: task})
-
-    assert result.outcome == AttemptOutcome.succeeded
-    assert result.output == {"customer_id": 7}
 
 
 # The static lint reads the same notion of serializability
