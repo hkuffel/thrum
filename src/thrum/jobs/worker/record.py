@@ -1,11 +1,12 @@
 """Record: close the Attempt and either retry the Run or set it terminal.
 
 Runs in its own short transaction, after execution, so no DB transaction is held
-open while the Task runs. On a Task-attributable failure (`failed`/`timed_out`)
-Record consults the Task's retry policy: while the Attempt budget remains it
-returns the Run to `pending` with a backed-off `next_attempt_at` (ADR-0021), and
-only on budget exhaustion sets the Run terminal `failed`. The budget is counted
-from Task-attributable Attempt outcomes, never from `attempt_number`, so a reaped
+open while the Operation runs. On an Operation-attributable failure
+(`failed`/`timed_out`) Record consults the Operation's retry policy: while the
+Attempt budget remains it returns the Run to `pending` with a backed-off
+`next_attempt_at` (ADR-0021), and only on budget exhaustion sets the Run terminal
+`failed`. The budget is counted from Operation-attributable Attempt outcomes,
+never from `attempt_number`, so a reaped
 or requeued Worker death never consumes a retry (ADR-0020). The count and the
 `pending` + `next_attempt_at` write share this one transaction, so a retry is
 never half-committed.
@@ -28,11 +29,11 @@ if TYPE_CHECKING:
     from thrum.jobs.worker.claim import ClaimedRun
     from thrum.jobs.worker.execute import ExecutionResult
 
-# Outcomes that spend the Attempt budget — the Task's own fault (ADR-0020).
-# `abandoned`/`requeued` (the Worker, not the Task) are deliberately excluded.
+# Outcomes that spend the Attempt budget — the Operation's own fault (ADR-0020).
+# `abandoned`/`requeued` (the Worker, not the Operation) are deliberately excluded.
 _BUDGETED = (AttemptOutcome.failed, AttemptOutcome.timed_out)
 
-# An unresolved Task (not registered in this Worker) cannot be retried meaningfully
+# An unresolved Operation (not registered in this Worker) cannot be retried meaningfully
 # — treat it as a single, non-retryable attempt so the misconfiguration surfaces
 # as a terminal `failed` rather than hot-looping (ADR-0021).
 _NO_RETRY = RetryPolicy(max_attempts=1)
@@ -42,7 +43,7 @@ async def record_result(
     session: AsyncSession,
     claimed: ClaimedRun,
     result: ExecutionResult,
-    task: Task | None = None,
+    operation: Task | None = None,
 ) -> None:
     """Close the Attempt with its outcome, then move the Run to its next state:
     `succeeded`, a backed-off `pending` retry, or terminal `failed` once the budget
@@ -63,10 +64,10 @@ async def record_result(
         await session.flush()
         return
 
-    # Task-attributable failure: retry while the budget allows (ADR-0020/0021).
-    # Per-call override (run.max_attempts) takes precedence over the Task's
+    # Operation-attributable failure: retry while the budget allows (ADR-0020/0021).
+    # Per-call override (run.max_attempts) takes precedence over the Operation's
     # default; NULL means inherit.
-    policy = task.retry_policy if task is not None else _NO_RETRY
+    policy = operation.retry_policy if operation is not None else _NO_RETRY
     if run.max_attempts is not None:
         policy = dataclasses.replace(policy, max_attempts=run.max_attempts)
     await session.flush()  # make this Attempt's outcome visible to the budget count

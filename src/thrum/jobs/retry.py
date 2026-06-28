@@ -1,9 +1,9 @@
 """Retry policy + backoff curve (ADR-0021). Capped exponential with full jitter.
 
 Lives at the SDK-core weight (stdlib only, no Worker/server imports — the
-import-discipline law in pyproject.toml) because `RetryPolicy` is a property of a
-Task, which is core surface. Record (Worker side) imports `backoff_delay` from
-here; the Task references `RetryPolicy` from here. Pure with respect to the
+import-discipline law in pyproject.toml) because `RetryPolicy` is a property of an
+Operation, which is core surface. Record (Worker side) imports `backoff_delay`
+from here; the Operation references `RetryPolicy` from here. Pure with respect to the
 database and the clock: `backoff_delay` returns a `timedelta` that Record adds to
 Postgres `now()` to set `next_attempt_at`. The random source is injectable so
 jitter is deterministic under test.
@@ -24,9 +24,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class RetryPolicy:
-    """A Task's budget + backoff curve (ADR-0021). Defaults are the simple-correct
-    beachhead: a 1→2→4→…→300s envelope with full jitter on. `max_attempts` is the
-    Attempt budget of Task-attributable tries (ADR-0020), not a backoff knob — with
+    """An Operation's budget + backoff curve (ADR-0021). Defaults are the
+    simple-correct beachhead: a 1→2→4→…→300s envelope with full jitter on.
+    `max_attempts` is the Attempt budget of Operation-attributable tries
+    (ADR-0020), not a backoff knob — with
     the default of 1 the curve never fires, so single-attempt behavior is
     unchanged."""
 
@@ -42,7 +43,7 @@ def backoff_delay(
     policy: RetryPolicy,
     rng: Callable[[], float] = random.random,
 ) -> dt.timedelta:
-    """Delay before the retry that follows the `failure_index`-th Task failure
+    """Delay before the retry that follows the `failure_index`-th Operation failure
     (1-indexed: 1 is the first failure). The ceiling is
     `min(max_delay, initial_delay × factor^(failure_index − 1))`; with jitter on
     the actual delay is uniform in `[0, ceiling]` (`rng()` ∈ [0, 1)).

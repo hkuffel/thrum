@@ -22,8 +22,8 @@ async def _get_schedule(session: AsyncSession, ns: str, name: str) -> Schedule |
     return (
         await session.execute(
             select(Schedule).where(
-                Schedule.task_namespace == ns,
-                Schedule.task_name == name,
+                Schedule.operation_namespace == ns,
+                Schedule.operation_name == name,
             )
         )
     ).scalar_one_or_none()
@@ -106,8 +106,8 @@ async def test_changed_cron_inserts_new_row(session_factory):
         rows = (
             await s.execute(
                 select(Schedule).where(
-                    Schedule.task_namespace == "ns",
-                    Schedule.task_name == "recur",
+                    Schedule.operation_namespace == "ns",
+                    Schedule.operation_name == "recur",
                 )
             )
         ).scalars().all()
@@ -171,8 +171,8 @@ async def test_concurrent_asserts_converge(session_factory):
         rows = (
             await s.execute(
                 select(Schedule).where(
-                    Schedule.task_namespace == "ns",
-                    Schedule.task_name == "concurrent",
+                    Schedule.operation_namespace == "ns",
+                    Schedule.operation_name == "concurrent",
                 )
             )
         ).scalars().all()
@@ -182,7 +182,7 @@ async def test_concurrent_asserts_converge(session_factory):
 @pytest.mark.asyncio
 async def test_multiple_schedules_per_operation_all_persist(session_factory):
     # Two recurrences for one operation must produce two rows, not collapse
-    # onto the last-declared one (uq_schedules_task_cron keys on cron).
+    # onto the last-declared one (uq_schedules_operation_cron keys on cron).
     declared = {
         "ns.multi": [
             _spec(cron="0 2 * * *", timezone="UTC"),
@@ -198,8 +198,8 @@ async def test_multiple_schedules_per_operation_all_persist(session_factory):
         rows = (
             await s.execute(
                 select(Schedule).where(
-                    Schedule.task_namespace == "ns",
-                    Schedule.task_name == "multi",
+                    Schedule.operation_namespace == "ns",
+                    Schedule.operation_name == "multi",
                 )
             )
         ).scalars().all()
@@ -226,7 +226,7 @@ async def test_resibling_schedule_updates_only_its_row(session_factory):
     async with session_factory() as s:
         first = (
             await s.execute(
-                select(Schedule).where(Schedule.task_name == "sib")
+                select(Schedule).where(Schedule.operation_name == "sib")
             )
         ).scalars().all()
     ids = {r.cron: r.id for r in first}
@@ -239,7 +239,7 @@ async def test_resibling_schedule_updates_only_its_row(session_factory):
     async with session_factory() as s:
         rows = (
             await s.execute(
-                select(Schedule).where(Schedule.task_name == "sib")
+                select(Schedule).where(Schedule.operation_name == "sib")
             )
         ).scalars().all()
     by_cron = {r.cron: r for r in rows}

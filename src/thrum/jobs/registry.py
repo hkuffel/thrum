@@ -1,14 +1,13 @@
-"""Operation, Task, and Registry (ADR-0023 / CONTEXT.md). A `Registry` declares a
+"""Operation and Registry (ADR-0023 / CONTEXT.md). A `Registry` declares a
 `namespace` once; an `@registry.operation` inherits that namespace, and a bare
 `@operation` falls into the process-shared `default` registry. Identity is
 `namespace.name`, user-owned and stable across refactors — never derived from
 import path. The process-global view fails fast on a `namespace.name` collision
 at decoration/import time so the misconfiguration cannot reach the Worker.
 
-The `Operation` is the authoring surface — what the developer writes and what
-`.enqueue(...)` projects onto the queue. `Task` survives as an internal value
-object (worker execution still talks Task-shape via duck-typed `.fn`/
-`.retry_policy`); user code does not author Tasks directly.
+The `Operation` is the sole authoring surface — what the developer writes and
+what `.enqueue(...)` projects onto the queue. The Worker reads execution config
+off the registered Operation via duck-typed `.fn` / `.retry_policy`.
 
 SDK-core surface: stdlib + croniter only, no Worker/server imports (the
 import-discipline law)."""
@@ -70,11 +69,11 @@ def _validate_timezone(tz: str) -> None:
 
 @dataclass
 class Task:
-    """Internal value object carrying a callable's identity + execution config.
-    No longer the authoring surface (that role moved to `Operation` — ADR-0023);
-    survives as the value-object shape the Worker reads when it executes a Run.
-    Worker tests that exercise the execute/record path directly still construct
-    it."""
+    """Internal value object carrying a callable's identity + execution config —
+    the duck-typed `.fn` / `.retry_policy` shape the Worker reads to execute a
+    Run. Not an authoring surface (that is `Operation`, ADR-0023) and not
+    exported from `thrum.jobs`; Worker tests that exercise the execute/record
+    path directly construct it without booting the full registry."""
 
     fn: Callable[..., Any]
     namespace: str
@@ -114,7 +113,7 @@ class Operation(Generic[P, R]):
     Still directly callable so unit-testing the function body does not require
     booting the queue. Carries the same execution config the Worker reads
     (`fn`, `retry_policy`) so a registered Operation can sit in
-    `Registry._global` without a separate Task companion."""
+    `Registry._global` and be executed directly."""
 
     fn: Callable[P, R]
     namespace: str

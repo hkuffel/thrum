@@ -21,8 +21,8 @@ async def _get_schedule(session: AsyncSession, ns: str, name: str) -> Schedule |
     return (
         await session.execute(
             select(Schedule).where(
-                Schedule.task_namespace == ns,
-                Schedule.task_name == name,
+                Schedule.operation_namespace == ns,
+                Schedule.operation_name == name,
             )
         )
     ).scalar_one_or_none()
@@ -38,7 +38,7 @@ async def _insert_and_age(session_factory, key: str, age: dt.timedelta):
             text(
                 "UPDATE thrum.schedules "
                 "SET last_declared_at = now() - make_interval(secs => :secs) "
-                "WHERE task_namespace = :ns AND task_name = :name"
+                "WHERE operation_namespace = :ns AND operation_name = :name"
             ),
             {"secs": age.total_seconds(), "ns": ns, "name": name},
         )
@@ -120,7 +120,7 @@ async def test_deploy_anti_thrash(session_factory):
             text(
                 "UPDATE thrum.schedules "
                 "SET last_declared_at = now() - make_interval(secs => :secs) "
-                "WHERE task_namespace = 'ns' AND task_name = 'y'"
+                "WHERE operation_namespace = 'ns' AND operation_name = 'y'"
             ),
             {"secs": dt.timedelta(minutes=10).total_seconds()},
         )

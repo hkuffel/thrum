@@ -1,6 +1,6 @@
-"""The Worker (CONTEXT.md): a standalone process that loads the user's Task code,
-claims due Runs from Postgres, and executes them out-of-process from the app. One
-asyncio event loop (ADR-0005).
+"""The Worker (CONTEXT.md): a standalone process that loads the user's Operation
+code, claims due Runs from Postgres, and executes them out-of-process from the
+app. One asyncio event loop (ADR-0005).
 
 Around the enqueue → claim → execute → record path it runs the lease-recovery
 substrate: a per-Worker Heartbeat coroutine renewing every open Attempt's lease on
@@ -8,8 +8,9 @@ a dedicated connection (ADR-0013); leader election, where each Worker contends f
 a session-scoped advisory lock on its own connection (ADR-0007); and the
 leader-gated sweep, where the winner materializes the horizon, marks missed
 occurrences, and reaps orphaned Attempts (ADR-0013/0020). Claim handles both the
-`pending` and `scheduled` arms, so cron work flows end to end. A Task-attributable
-failure does not fail terminally on the first raise: Record returns the Run to
+`pending` and `scheduled` arms, so cron work flows end to end. An
+Operation-attributable failure does not fail terminally on the first raise:
+Record returns the Run to
 `pending` with a backed-off `next_attempt_at` until its Attempt budget is spent
 (ADR-0020/0021).
 
@@ -45,11 +46,11 @@ async def run_once(
     worker_id: str,
     limit: int,
     lease_ttl: dt.timedelta,
-    tasks: dict[str, Task] | None = None,
+    operations: dict[str, Task] | None = None,
 ) -> int:
     """One claim → execute → record pass. Returns the number of Runs processed.
 
-    Claim commits (releasing row locks) before any Task executes; each Run's
+    Claim commits (releasing row locks) before any Operation executes; each Run's
     result is then recorded in its own transaction. The testable seam beneath
     `Worker.run`.
 
@@ -58,20 +59,21 @@ async def run_once(
     collapses execute + effect-recording + record into one transaction with a
     framework-built session. See `worker/execute.py`. Not yet implemented.
     """
-    if tasks is None:
-        tasks = Registry._global
+    if operations is None:
+        operations = Registry._global
 
     async with session_factory() as session:
         async with session.begin():
             claimed = await claim_runs(session, worker_id, limit, lease_ttl)
 
     for item in claimed:
-        result = await execute_run(item, tasks)
+        result = await execute_run(item, operations)
         async with session_factory() as session:
             async with session.begin():
-                # Record needs the Task's retry policy to decide retry-vs-terminal
-                # (ADR-0021); an unresolved Task (None) is non-retryable.
-                await record_result(session, item, result, tasks.get(item.task_key))
+                # Record needs the Operation's retry policy to decide
+                # retry-vs-terminal (ADR-0021); an unresolved Operation (None) is
+                # non-retryable.
+                await record_result(session, item, result, operations.get(item.operation_key))
 
     return len(claimed)
 
@@ -90,7 +92,7 @@ class Worker:
         Worker) and the leader-gated sweep (whichever Worker holds the lock).
 
         Each loop gets its own engine so the three concerns never share a pooled
-        connection (ADR-0013): a Task holding an execution session open must not
+        connection (ADR-0013): an Operation holding an execution session open must not
         be able to block lease renewal, and the advisory lock must live on a
         connection nothing else touches."""
         from sqlalchemy.ext.asyncio import async_sessionmaker

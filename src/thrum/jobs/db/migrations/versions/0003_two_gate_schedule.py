@@ -5,8 +5,10 @@ declaration gate (code-owned, written by reconcile) and the operational gate
 (control-plane-owned, reserved in v1). Add `last_declared_at` and the
 `uq_schedules_task` unique constraint on (task_namespace, task_name).
 
-Fresh databases already get the new columns from 0001's model-derived
-`create_all`, so each operation is guarded for idempotency.
+This predates the task_* -> operation_* column rename (0007), so it speaks the
+task_* names of its own era. Fresh databases get the renamed columns straight
+from 0001's model-derived `create_all`, so every step is guarded — the
+constraint create only fires when the legacy task_* columns are actually present.
 
 Revision ID: 0003_two_gate
 Revises: 0002_start_grace
@@ -85,7 +87,7 @@ def upgrade() -> None:
         )
     if _has_column(bind, "paused"):
         op.drop_column("schedules", "paused", schema=SCHEMA)
-    if not _has_constraint(bind, "uq_schedules_task"):
+    if _has_column(bind, "task_namespace") and not _has_constraint(bind, "uq_schedules_task"):
         op.create_unique_constraint(
             "uq_schedules_task", "schedules", ["task_namespace", "task_name"], schema=SCHEMA
         )

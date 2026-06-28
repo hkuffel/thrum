@@ -29,7 +29,7 @@ LEASE = dt.timedelta(seconds=45)
 @pytest.fixture(autouse=True)
 def _clean_global_registry():
     """The Registry's process-global view bleeds between tests; isolate it."""
-    saved_tasks = Registry._global.copy()
+    saved_operations = Registry._global.copy()
     saved_schedules = Registry._global_schedules.copy()
     Registry._global.clear()
     Registry._global_schedules.clear()
@@ -37,7 +37,7 @@ def _clean_global_registry():
         yield
     finally:
         Registry._global.clear()
-        Registry._global.update(saved_tasks)
+        Registry._global.update(saved_operations)
         Registry._global_schedules.clear()
         Registry._global_schedules.update(saved_schedules)
 
@@ -61,8 +61,8 @@ async def test_e2e_declared_schedule_through_the_front_door(
 
     async with session_factory() as session:
         row = (await session.execute(select(Schedule))).scalars().one()
-    assert row.task_namespace == "e2e"
-    assert row.task_name == "send_receipts"
+    assert row.operation_namespace == "e2e"
+    assert row.operation_name == "send_receipts"
     assert row.cron == "* * * * *"
     assert row.declaration_active is True
     assert row.operationally_paused_at is None
@@ -83,7 +83,7 @@ async def test_e2e_declared_schedule_through_the_front_door(
 
     # Claim → execute → record
     processed = await run_once(
-        session_factory, "worker-e2e", 10, LEASE, tasks=Registry._global
+        session_factory, "worker-e2e", 10, LEASE, operations=Registry._global
     )
     assert processed == 1
 

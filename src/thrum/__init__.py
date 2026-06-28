@@ -13,8 +13,11 @@ top-level module re-exports them as the package's front door.
 
 from __future__ import annotations
 
-from thrum.jobs.app import App as App, CompileError as CompileError
-from thrum.jobs.registry import Operation as Operation, Registry as Registry, operation as operation
+from thrum.jobs.app import App as App
+from thrum.jobs.app import CompileError as CompileError
+from thrum.jobs.registry import Operation as Operation
+from thrum.jobs.registry import Registry as Registry
+from thrum.jobs.registry import operation as operation
 
 __version__ = "0.0.2"
 
