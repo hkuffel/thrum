@@ -42,6 +42,21 @@ class Caller:
     def system(cls) -> Caller:
         return cls(subject="system")
 
+    def freeze(self) -> dict[str, Any]:
+        """Serialize the Caller onto a Run at Enqueue. The queue is the one
+        transport that cannot supply a live Caller — invocation and execution are
+        separated in time and process — so identity is frozen here and thawed back
+        into the Scope at execution (ADR-0024)."""
+        return {"subject": self.subject}
+
+    @classmethod
+    def thaw(cls, frozen: dict[str, Any] | None) -> Caller:
+        """Restore the Caller frozen onto a Run. A Run with no frozen Caller — a
+        cron occurrence the scheduler materialized — runs on system authority."""
+        if frozen is None:
+            return cls.system()
+        return cls(subject=frozen["subject"])
+
 
 @dataclass
 class ProviderContext:

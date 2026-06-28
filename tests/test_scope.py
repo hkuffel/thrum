@@ -11,6 +11,7 @@ state, never internal wiring.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as dt
 from contextlib import asynccontextmanager
 
@@ -18,7 +19,7 @@ import pytest
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from thrum.jobs import App, CompileError, db_provider, enqueue, operation
+from thrum.jobs import App, Caller, CompileError, db_provider, enqueue, operation
 from thrum.jobs.config import WorkerConfig
 from thrum.jobs.models import Attempt, AttemptOutcome, Run, RunStatus, Schedule
 from thrum.jobs.registry import Registry, Task
@@ -402,3 +403,71 @@ async def test_run_once_without_app_does_not_reach_global_registry(session_facto
         ).scalars().one()
     assert run.status == RunStatus.failed
     assert "not registered" in attempt.error
+
+
+# Caller freeze/thaw: the identity stamped at Enqueue is restored into the Scope
+
+def _capturing_db_provider(seen: list[Caller]):
+    """The real `db` Provider, wrapped to record the Caller the Scope passes it —
+    proof the thawed Caller reaches Capability construction full-authority."""
+
+    @asynccontextmanager
+    async def provider(ctx, caller):
+        seen.append(caller)
+        async with db_provider(ctx, caller) as db:
+            yield db
+
+    return provider
+
+
+async def test_enqueue_stamps_system_caller_on_the_run(session_factory):
+    async with session_factory() as session:
+        run = enqueue(session, "probe.noop")
+        await session.commit()
+        run_id = run.id
+
+    async with session_factory() as session:
+        run = await session.get(Run, run_id)
+    assert run.caller == Caller.system().freeze()
+
+
+async def test_scope_thaws_the_caller_stamped_at_enqueue(session_factory):
+    await _reset_probe(session_factory)
+    seen: list[Caller] = []
+
+    async def writer(*, db: AsyncSession) -> dict:
+        await _write_probe(db, "ok")
+        return {"ok": True}
+
+    task = Task(fn=writer, namespace="probe", name="caller")
+    await _enqueue(session_factory, task.key)
+    item = await _claim_one(session_factory)
+
+    await run_scoped(
+        session_factory, item, {task.key: task}, {AsyncSession: _capturing_db_provider(seen)}
+    )
+
+    # The db Provider received exactly the Caller frozen at Enqueue, and full
+    # authority — no attenuation: the probe write committed unblocked.
+    assert seen == [Caller.system()]
+    assert await _probe_count(session_factory) == 1
+
+
+async def test_malformed_frozen_caller_records_failed_not_stuck(session_factory):
+    # A frozen Caller missing "subject" (schema drift, manual intervention) must
+    # be recorded as a failed Attempt, never propagate — or the Run hangs
+    # `running` and the Reaper re-claims the same bad row forever.
+    async def op(*, db: AsyncSession) -> dict:
+        return {"ok": True}
+
+    task = Task(fn=op, namespace="probe", name="bad_caller")
+    run_id = await _enqueue(session_factory, task.key)
+    item = dataclasses.replace(await _claim_one(session_factory), caller={"role": "no-subject"})
+
+    await run_scoped(session_factory, item, {task.key: task}, {AsyncSession: db_provider})
+
+    async with session_factory() as session:
+        run = await session.get(Run, run_id)
+        attempt = await session.get(Attempt, item.attempt_id)
+    assert run.status == RunStatus.failed
+    assert attempt.outcome == AttemptOutcome.failed

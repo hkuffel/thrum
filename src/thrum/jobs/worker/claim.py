@@ -38,6 +38,7 @@ class ClaimedRun:
     attempt_id: uuid.UUID
     operation_key: str  # namespace.name
     inputs: dict
+    caller: dict | None  # the Caller frozen at Enqueue, thawed by the Scope
 
 
 async def claim_runs(
@@ -101,6 +102,7 @@ async def claim_runs(
                 attempt_id=attempt.id,
                 operation_key=f"{run.operation_namespace}.{run.operation_name}",
                 inputs=dict(run.inputs or {}),
+                caller=dict(run.caller) if run.caller else None,
             )
         )
     return claimed
