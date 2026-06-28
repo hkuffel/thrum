@@ -236,10 +236,10 @@ def _flaky_task(fails: int) -> Task:
 async def test_e2e_task_succeeds_after_two_retries(session_factory):
     task = _flaky_task(fails=2)
     run_id = await _enqueue(session_factory, task.key)
-    tasks = {task.key: task}
+    operations = {task.key: task}
 
     for _ in range(3):  # fail, fail, succeed
-        await run_once(session_factory, "worker-1", 10, LEASE, operations=tasks)
+        await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -272,12 +272,12 @@ async def test_e2e_always_failing_task_exhausts_budget(session_factory):
         retry_jitter=False,
     )
     run_id = await _enqueue(session_factory, task.key)
-    tasks = {task.key: task}
+    operations = {task.key: task}
 
-    await run_once(session_factory, "worker-1", 10, LEASE, operations=tasks)
-    await run_once(session_factory, "worker-1", 10, LEASE, operations=tasks)
+    await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
+    await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
     # Budget spent — nothing left to claim.
-    processed = await run_once(session_factory, "worker-1", 10, LEASE, operations=tasks)
+    processed = await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
 
     assert processed == 0
     async with session_factory() as session:

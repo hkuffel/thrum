@@ -76,6 +76,10 @@ def downgrade() -> None:
     bind = op.get_bind()
     if _has_constraint(bind, NEW_NAME):
         op.drop_constraint(NEW_NAME, "schedules", schema=SCHEMA, type_="unique")
+    if not _has_column(bind, "task_namespace"):
+        # Fresh operation_* DBs (or a downgrade run before 0007 restores the
+        # legacy names) have no task_* columns to collapse or re-key.
+        return
     # The widened constraint may have allowed multiple cron rows per operation.
     # The old (task_namespace, task_name) constraint cannot tolerate them, so
     # collapse each operation to its earliest-inserted row before recreating it.

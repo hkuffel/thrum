@@ -29,7 +29,7 @@ LEASE = dt.timedelta(seconds=45)
 @pytest.fixture(autouse=True)
 def _clean_global_registry():
     """The Registry's process-global view bleeds between tests; isolate it."""
-    saved_tasks = Registry._global.copy()
+    saved_operations = Registry._global.copy()
     saved_schedules = Registry._global_schedules.copy()
     Registry._global.clear()
     Registry._global_schedules.clear()
@@ -37,7 +37,7 @@ def _clean_global_registry():
         yield
     finally:
         Registry._global.clear()
-        Registry._global.update(saved_tasks)
+        Registry._global.update(saved_operations)
         Registry._global_schedules.clear()
         Registry._global_schedules.update(saved_schedules)
 
