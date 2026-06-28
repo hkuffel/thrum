@@ -29,6 +29,15 @@ class RunStatus(enum.StrEnum):
     missed = "missed"
 
 
+class EffectKind(enum.StrEnum):
+    """The mutation an Effect records. Table-level only — no read kind, since an
+    Effect is what an Attempt changed, not what it observed (ADR-0024)."""
+
+    insert = "insert"
+    update = "update"
+    delete = "delete"
+
+
 class AttemptOutcome(enum.StrEnum):
     """How an Attempt ended. The taxonomy drives the dashboard's "is this
     alarming?" read: `abandoned` is a reaped orphan (alarming), `requeued` is a

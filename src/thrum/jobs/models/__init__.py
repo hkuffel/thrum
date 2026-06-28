@@ -2,7 +2,8 @@
 
 from thrum.jobs.models.attempt import Attempt
 from thrum.jobs.models.base import SCHEMA, Base
-from thrum.jobs.models.enums import AttemptOutcome, RunStatus, Trigger
+from thrum.jobs.models.effect import Effect
+from thrum.jobs.models.enums import AttemptOutcome, EffectKind, RunStatus, Trigger
 from thrum.jobs.models.run import Run
 from thrum.jobs.models.schedule import Schedule
 
@@ -12,7 +13,9 @@ __all__ = [
     "Schedule",
     "Run",
     "Attempt",
+    "Effect",
     "Trigger",
     "RunStatus",
     "AttemptOutcome",
+    "EffectKind",
 ]

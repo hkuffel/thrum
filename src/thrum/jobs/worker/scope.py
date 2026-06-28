@@ -5,9 +5,9 @@ The Scope owns the execution transaction ("Txn 2"). It assembles the Operation's
 Capabilities via registered Providers on a shared `AsyncExitStack`, injects them
 into the keyword-only capability params, runs the body, and branches:
 
-    success  -> record the succeeded Attempt + output in Txn 2, commit. The
-                Operation's DB writes and its completion record become one
-                atomic fact.
+    success  -> record the succeeded Attempt + output + the observed Effects in
+                Txn 2, commit. The Operation's DB writes, the Effect records, and
+                its completion record become one atomic fact.
     failure  -> roll back Txn 2 (nothing lands), then record the failed Attempt
                 + retry state in a separate short transaction. The failure
                 outcome must not ride Txn 2 or it would roll back with the
@@ -29,6 +29,7 @@ from thrum.jobs.models import AttemptOutcome
 from thrum.jobs.providers import Caller, ProviderContext
 from thrum.jobs.serialization import SerializationContractError, ensure_serializable
 from thrum.jobs.signature import ParamKind, classify
+from thrum.jobs.worker.effects import EffectRecorder
 from thrum.jobs.worker.execute import ExecutionResult
 from thrum.jobs.worker.record import record_result
 
@@ -80,8 +81,14 @@ async def run_scoped(
                         providers[capability_type](ctx, caller)
                     )
                 async with session.begin():
-                    output = await _invoke(operation.fn, claimed.inputs, injected)
+                    async with EffectRecorder.observing(session) as recorder:
+                        output = await _invoke(operation.fn, claimed.inputs, injected)
+                        # Force the body's pending ORM writes through the recorder
+                        # before the block exits and detaches; raw executes already
+                        # fired.
+                        await session.flush()
                     ensure_serializable(output, owner=claimed.operation_key, role="output")
+                    await recorder.write(session, claimed.attempt_id)
                     await record_result(
                         session,
                         claimed,
