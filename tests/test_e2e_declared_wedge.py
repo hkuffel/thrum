@@ -1,6 +1,6 @@
 """End-to-end test: the declared front door now feeds the wedge.
 
-Declare a Task with a due `schedule` → Worker startup assert writes the Schedule
+Declare an Operation with a due `schedule` → Worker startup assert writes the Schedule
 row → the leader sweep materializes a `scheduled` Run → Claim flips it to
 `running` → Record terminates it `succeeded`. No hand-inserted SQL — every row
 along the path is written by the system, proving the declared front door drives

@@ -67,53 +67,14 @@ def _validate_timezone(tz: str) -> None:
         raise ValueError(f"Unknown IANA timezone: {tz!r}") from None
 
 
-@dataclass
-class Task:
-    """Internal value object carrying a callable's identity + execution config —
-    the duck-typed `.fn` / `.retry_policy` shape the Worker reads to execute a
-    Run. Not an authoring surface (that is `Operation`, ADR-0023) and not
-    exported from `thrum.jobs`; Worker tests that exercise the execute/record
-    path directly construct it without booting the full registry."""
-
-    fn: Callable[..., Any]
-    namespace: str
-    name: str
-    max_attempts: int = 1
-    timeout: float | None = None  # seconds; enforcement strength varies by context
-    cpu_bound: bool = False        # opt into the process pool (ADR-0005)
-
-    # Retry curve (ADR-0021). With max_attempts=1 these never fire, so the default
-    # single-attempt behavior is unchanged; raising max_attempts opts into retries.
-    retry_initial_delay: float = 1.0
-    retry_max_delay: float = 300.0
-    retry_backoff_factor: float = 2.0
-    retry_jitter: bool = True
-
-    declared_schedule: DeclaredSchedule | None = None
-
-    @property
-    def key(self) -> str:
-        return f"{self.namespace}.{self.name}"
-
-    @property
-    def retry_policy(self) -> RetryPolicy:
-        return RetryPolicy(
-            max_attempts=self.max_attempts,
-            initial_delay=self.retry_initial_delay,
-            max_delay=self.retry_max_delay,
-            backoff_factor=self.retry_backoff_factor,
-            jitter=self.retry_jitter,
-        )
-
-
 @dataclass(frozen=True)
 class Operation(Generic[P, R]):
-    """The authored unit (ADR-0023). Holds resolved identity (`namespace.name`)
-    and the captured signature; projects onto the durable queue via `.enqueue`.
-    Still directly callable so unit-testing the function body does not require
-    booting the queue. Carries the same execution config the Worker reads
-    (`fn`, `retry_policy`) so a registered Operation can sit in
-    `Registry._global` and be executed directly."""
+    """The authored unit (ADR-0023) and the sole execution-config surface: it
+    holds resolved identity (`namespace.name`) and the captured signature,
+    projects onto the durable queue via `.enqueue`, and carries the
+    `fn` / `retry_policy` the Worker reads to execute a Run. Still directly
+    callable so unit-testing the function body does not require booting the
+    queue."""
 
     fn: Callable[P, R]
     namespace: str

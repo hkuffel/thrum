@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from thrum.jobs.providers import Provider
-    from thrum.jobs.registry import Task
+    from thrum.jobs.registry import Operation
 
 
 async def run_once(
@@ -46,7 +46,7 @@ async def run_once(
     worker_id: str,
     limit: int,
     lease_ttl: dt.timedelta,
-    operations: dict[str, Task] | None = None,
+    operations: dict[str, Operation] | None = None,
     *,
     app: App | None = None,
 ) -> int:

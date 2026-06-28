@@ -69,7 +69,7 @@ async def test_idempotent_rerun_refreshes_last_declared_at(session_factory):
 
 @pytest.mark.asyncio
 async def test_changed_tz_updates_in_place(session_factory):
-    # Same cron, changed timezone/policy: schedule identity is (task, cron),
+    # Same cron, changed timezone/policy: schedule identity is (operation, cron),
     # so this updates the existing row in place.
     declared_v1 = {"ns.evolve": [_spec(cron="0 2 * * *", timezone="America/Vancouver")]}
     declared_v2 = {"ns.evolve": [_spec(cron="0 2 * * *", timezone="Europe/London")]}
@@ -91,7 +91,7 @@ async def test_changed_tz_updates_in_place(session_factory):
 
 @pytest.mark.asyncio
 async def test_changed_cron_inserts_new_row(session_factory):
-    # A changed cron is a *different* recurrence (identity is task+cron): the
+    # A changed cron is a *different* recurrence (identity is operation+cron): the
     # new cron inserts a fresh row and the old row survives to be reaped by
     # pause_stale_schedules once it stops being declared.
     declared_v1 = {"ns.recur": [_spec(cron="0 2 * * *")]}

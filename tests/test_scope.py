@@ -19,10 +19,11 @@ import pytest
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from factories import make_operation
 from thrum.jobs import App, Caller, CompileError, db_provider, enqueue, operation
 from thrum.jobs.config import WorkerConfig
 from thrum.jobs.models import Attempt, AttemptOutcome, Run, RunStatus, Schedule
-from thrum.jobs.registry import Registry, Task
+from thrum.jobs.registry import Registry
 from thrum.jobs.scheduler.reaper import reap_orphans
 from thrum.jobs.worker import Worker, run_once
 from thrum.jobs.worker.claim import claim_runs
@@ -89,11 +90,11 @@ async def test_injected_session_write_commits_with_attempt(session_factory):
         await _write_probe(db, "succeeded")
         return {"wrote": 1}
 
-    task = Task(fn=writer, namespace="probe", name="writer")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=writer, namespace="probe", name="writer")
+    run_id = await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
 
-    await run_scoped(session_factory, item, {task.key: task}, {AsyncSession: db_provider})
+    await run_scoped(session_factory, item, {operation.key: operation}, {AsyncSession: db_provider})
 
     assert await _probe_count(session_factory) == 1
     async with session_factory() as session:
@@ -114,11 +115,11 @@ async def test_raised_body_rolls_back_and_records_failed(session_factory):
         await _write_probe(db, "doomed")
         raise ValueError("nope")
 
-    task = Task(fn=boom, namespace="probe", name="boom")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=boom, namespace="probe", name="boom")
+    run_id = await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
 
-    await run_scoped(session_factory, item, {task.key: task}, {AsyncSession: db_provider})
+    await run_scoped(session_factory, item, {operation.key: operation}, {AsyncSession: db_provider})
 
     # Zero committed effects — the probe write rolled back with Txn 2.
     assert await _probe_count(session_factory) == 0
@@ -134,11 +135,11 @@ async def test_non_serializable_output_fails_without_traceback(session_factory):
     async def bad_output(*, db: AsyncSession):
         return {"obj": object()}
 
-    task = Task(fn=bad_output, namespace="probe", name="bad_output")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=bad_output, namespace="probe", name="bad_output")
+    run_id = await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
 
-    await run_scoped(session_factory, item, {task.key: task}, {AsyncSession: db_provider})
+    await run_scoped(session_factory, item, {operation.key: operation}, {AsyncSession: db_provider})
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -156,12 +157,12 @@ async def test_providers_torn_down_on_success_path(session_factory):
     async def op(*, t: Telemetry) -> dict:
         return {}
 
-    task = Task(fn=op, namespace="probe", name="ok")
-    await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=op, namespace="probe", name="ok")
+    await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
 
     await run_scoped(
-        session_factory, item, {task.key: task}, {Telemetry: _recording_provider(events)}
+        session_factory, item, {operation.key: operation}, {Telemetry: _recording_provider(events)}
     )
 
     assert events == ["enter", "exit"]
@@ -173,12 +174,12 @@ async def test_providers_torn_down_on_failure_path(session_factory):
     async def op(*, t: Telemetry) -> dict:
         raise RuntimeError("boom")
 
-    task = Task(fn=op, namespace="probe", name="raises")
-    await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=op, namespace="probe", name="raises")
+    await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
 
     await run_scoped(
-        session_factory, item, {task.key: task}, {Telemetry: _recording_provider(events)}
+        session_factory, item, {operation.key: operation}, {Telemetry: _recording_provider(events)}
     )
 
     assert events == ["enter", "exit"]
@@ -195,11 +196,13 @@ async def test_provider_setup_raise_is_recorded_not_propagated(session_factory):
     async def op(*, t: Telemetry) -> dict:
         return {"ok": True}
 
-    task = Task(fn=op, namespace="probe", name="setup_boom")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=op, namespace="probe", name="setup_boom")
+    run_id = await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
 
-    await run_scoped(session_factory, item, {task.key: task}, {Telemetry: exploding_setup})
+    await run_scoped(
+        session_factory, item, {operation.key: operation}, {Telemetry: exploding_setup}
+    )
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -220,11 +223,13 @@ async def test_failure_path_teardown_raise_still_records_failed(session_factory)
     async def op(*, t: Telemetry) -> dict:
         raise ValueError("body boom")
 
-    task = Task(fn=op, namespace="probe", name="both_boom")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=op, namespace="probe", name="both_boom")
+    run_id = await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
 
-    await run_scoped(session_factory, item, {task.key: task}, {Telemetry: exploding_teardown})
+    await run_scoped(
+        session_factory, item, {operation.key: operation}, {Telemetry: exploding_teardown}
+    )
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -244,12 +249,12 @@ async def test_provider_teardown_raise_after_commit_preserves_success(session_fa
     async def op(*, t: Telemetry) -> dict:
         return {"ok": True}
 
-    task = Task(fn=op, namespace="probe", name="ok_teardown")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=op, namespace="probe", name="ok_teardown")
+    run_id = await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
 
     with pytest.raises(RuntimeError, match="teardown boom"):
-        await run_scoped(session_factory, item, {task.key: task}, {Telemetry: exploding})
+        await run_scoped(session_factory, item, {operation.key: operation}, {Telemetry: exploding})
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -268,15 +273,17 @@ async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
     async def flaky(*, db: AsyncSession) -> dict:
         await _write_probe(db, "attempt")
         if state["crash"]:
-            raise asyncio.CancelledError  # worker death, not a Task failure
+            raise asyncio.CancelledError  # worker death, not an Operation failure
         return {"ok": True}
 
-    task = Task(fn=flaky, namespace="probe", name="flaky")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=flaky, namespace="probe", name="flaky")
+    run_id = await _enqueue(session_factory, operation.key)
     first = await _claim_one(session_factory, worker_id="worker-dead")
 
     with pytest.raises(asyncio.CancelledError):
-        await run_scoped(session_factory, first, {task.key: task}, {AsyncSession: db_provider})
+        await run_scoped(
+            session_factory, first, {operation.key: operation}, {AsyncSession: db_provider}
+        )
 
     # Nothing committed; the Run is still `running` with an open Attempt.
     assert await _probe_count(session_factory) == 0
@@ -297,7 +304,9 @@ async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
 
     state["crash"] = False
     second = await _claim_one(session_factory, worker_id="worker-live")
-    await run_scoped(session_factory, second, {task.key: task}, {AsyncSession: db_provider})
+    await run_scoped(
+        session_factory, second, {operation.key: operation}, {AsyncSession: db_provider}
+    )
 
     assert await _probe_count(session_factory) == 1
     async with session_factory() as session:
@@ -439,12 +448,15 @@ async def test_scope_thaws_the_caller_stamped_at_enqueue(session_factory):
         await _write_probe(db, "ok")
         return {"ok": True}
 
-    task = Task(fn=writer, namespace="probe", name="caller")
-    await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=writer, namespace="probe", name="caller")
+    await _enqueue(session_factory, operation.key)
     item = await _claim_one(session_factory)
 
     await run_scoped(
-        session_factory, item, {task.key: task}, {AsyncSession: _capturing_db_provider(seen)}
+        session_factory,
+        item,
+        {operation.key: operation},
+        {AsyncSession: _capturing_db_provider(seen)},
     )
 
     # The db Provider received exactly the Caller frozen at Enqueue, and full
@@ -460,11 +472,11 @@ async def test_malformed_frozen_caller_records_failed_not_stuck(session_factory)
     async def op(*, db: AsyncSession) -> dict:
         return {"ok": True}
 
-    task = Task(fn=op, namespace="probe", name="bad_caller")
-    run_id = await _enqueue(session_factory, task.key)
+    operation = make_operation(fn=op, namespace="probe", name="bad_caller")
+    run_id = await _enqueue(session_factory, operation.key)
     item = dataclasses.replace(await _claim_one(session_factory), caller={"role": "no-subject"})
 
-    await run_scoped(session_factory, item, {task.key: task}, {AsyncSession: db_provider})
+    await run_scoped(session_factory, item, {operation.key: operation}, {AsyncSession: db_provider})
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
