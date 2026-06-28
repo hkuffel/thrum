@@ -1,30 +1,20 @@
-"""Execute: resolve a claimed Run's Operation and run its code.
+"""ExecutionResult — the outcome value the Scope records (ADR-0024).
 
-Pure with respect to the database — it takes a ClaimedRun and an operation lookup,
-invokes the user's `fn`, and returns a structured outcome. Async context only for
-now; ADR-0005's thread-pool / process-pool routing is out of scope.
-
-This pure, out-of-transaction execution is the seam for the single-transaction
-injected-session model (ADR-0024): that model replaces this step so the operation
-runs inside one framework-owned transaction with an instrumented SQLAlchemy
-session, and effect-recording plus the completion `record` then commit atomically
-with the operation's own DB effects, making "succeeded but produced zero effects"
-detectable. Not yet implemented; this pure version is the current behavior.
+The pure, out-of-transaction `execute_run` this module once held is replaced by
+the Execution Scope's in-transaction invocation (`worker/scope.py`): the Operation
+now runs inside one framework-owned transaction with an injected session, so
+execution and recording are no longer separable steps. This value object survives
+as the shape Record consumes on both the success (in-transaction) and failure
+(separate-transaction) paths.
 """
 
 from __future__ import annotations
 
-import inspect
-import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from thrum.jobs.models import AttemptOutcome
-from thrum.jobs.serialization import SerializationContractError, ensure_serializable
-
 if TYPE_CHECKING:
-    from thrum.jobs.registry import Task
-    from thrum.jobs.worker.claim import ClaimedRun
+    from thrum.jobs.models import AttemptOutcome
 
 
 @dataclass(frozen=True)
@@ -32,43 +22,3 @@ class ExecutionResult:
     outcome: AttemptOutcome  # succeeded or failed
     output: dict | None
     error: str | None  # traceback on failure
-
-
-async def execute_run(claimed: ClaimedRun, operations: dict[str, Task]) -> ExecutionResult:
-    """Resolve the Operation by `namespace.name` and invoke it. A resolution miss
-    or a raised exception both produce a `failed` outcome with a captured message
-    — never propagated, so the Worker loop keeps turning."""
-    operation = operations.get(claimed.operation_key)
-    if operation is None:
-        return ExecutionResult(
-            outcome=AttemptOutcome.failed,
-            output=None,
-            error=f"Operation {claimed.operation_key!r} is not registered in this Worker",
-        )
-
-    try:
-        result = operation.fn(**claimed.inputs)
-        if inspect.isawaitable(result):
-            result = await result
-    except Exception:
-        return ExecutionResult(
-            outcome=AttemptOutcome.failed,
-            output=None,
-            error=traceback.format_exc(),
-        )
-
-    # The JSONB output column holds a dict; non-dict returns are dropped for now.
-    output = result if isinstance(result, dict) else None
-
-    # The completion serialization boundary: `Run.output` is JSONB, so a
-    # non-serializable output fails this Attempt with the contract error rather
-    # than aborting the recording transaction — a raise there would leave the
-    # Run unrecorded and the Reaper would retry the same bad output forever.
-    try:
-        ensure_serializable(output, owner=claimed.operation_key, role="output")
-    except SerializationContractError as exc:
-        return ExecutionResult(
-            outcome=AttemptOutcome.failed, output=None, error=str(exc)
-        )
-
-    return ExecutionResult(outcome=AttemptOutcome.succeeded, output=output, error=None)

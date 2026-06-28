@@ -1,15 +1,15 @@
-"""Tracer-bullet tests: enqueue → claim → execute → record against real Postgres.
+"""Tracer-bullet tests: enqueue → claim → scope.run → record against real
+Postgres.
 
-Execute is pure (no DB) and runs even without Docker; Claim/Record/e2e exercise
-the real schema through the `session_factory` fixture. Assertions are on
-observable state (Run status, Attempt fields, returned payloads), never on
-internal wiring.
+Claim/Record/e2e exercise the real schema through the `session_factory` fixture.
+The in-transaction Execution Scope (injected session, success/failure split) has
+its own suite in test_scope.py. Assertions are on observable state (Run status,
+Attempt fields, returned payloads), never on internal wiring.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -17,8 +17,8 @@ from thrum.jobs import enqueue
 from thrum.jobs.models import Attempt, AttemptOutcome, Run, RunStatus
 from thrum.jobs.registry import Task
 from thrum.jobs.worker import run_once
-from thrum.jobs.worker.claim import ClaimedRun, claim_runs
-from thrum.jobs.worker.execute import ExecutionResult, execute_run
+from thrum.jobs.worker.claim import claim_runs
+from thrum.jobs.worker.execute import ExecutionResult
 from thrum.jobs.worker.record import record_result
 
 LEASE = dt.timedelta(seconds=45)
@@ -30,58 +30,6 @@ async def _enqueue(session_factory, key: str, **inputs):
         run = enqueue(session, key, **inputs)
         await session.commit()
         return run.id
-
-
-# Execute (pure, no DB)
-
-async def test_execute_run_success_captures_dict_output():
-    def send(invoice_id):
-        return {"emailed": invoice_id}
-
-    task = Task(fn=send, namespace="billing", name="send_receipts")
-    claimed = ClaimedRun(uuid4(), uuid4(), "billing.send_receipts", {"invoice_id": 3})
-
-    result = await execute_run(claimed, {task.key: task})
-
-    assert result.outcome == AttemptOutcome.succeeded
-    assert result.output == {"emailed": 3}
-    assert result.error is None
-
-
-async def test_execute_run_awaits_async_tasks():
-    async def send(invoice_id):
-        return {"emailed": invoice_id}
-
-    task = Task(fn=send, namespace="billing", name="send_receipts")
-    claimed = ClaimedRun(uuid4(), uuid4(), "billing.send_receipts", {"invoice_id": 9})
-
-    result = await execute_run(claimed, {task.key: task})
-
-    assert result.outcome == AttemptOutcome.succeeded
-    assert result.output == {"emailed": 9}
-
-
-async def test_execute_run_failure_captures_traceback():
-    def boom():
-        raise ValueError("nope")
-
-    task = Task(fn=boom, namespace="billing", name="broken")
-    claimed = ClaimedRun(uuid4(), uuid4(), "billing.broken", {})
-
-    result = await execute_run(claimed, {task.key: task})
-
-    assert result.outcome == AttemptOutcome.failed
-    assert result.output is None
-    assert "ValueError: nope" in result.error
-
-
-async def test_execute_run_unregistered_task_fails_cleanly():
-    claimed = ClaimedRun(uuid4(), uuid4(), "ghost.task", {})
-
-    result = await execute_run(claimed, {})
-
-    assert result.outcome == AttemptOutcome.failed
-    assert "not registered" in result.error
 
 
 # Claim (real DB)
