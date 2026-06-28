@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from thrum.jobs.models import Run, RunStatus, Trigger
+from thrum.jobs.providers import Caller
 from thrum.jobs.registry import Operation
 from thrum.jobs.serialization import ensure_serializable
 
@@ -49,6 +50,10 @@ def enqueue(
         status=RunStatus.pending,
         inputs=inputs,
         max_attempts=max_attempts,
+        # Freeze the Caller in the caller's own transaction so identity commits with
+        # the Run and thaws into the Scope at execution. v1 stamps the system
+        # default; a real Caller travels this same path once auth exists (ADR-0024).
+        caller=Caller.system().freeze(),
         # next_attempt_at left NULL == claimable immediately; backoff sets it later.
     )
     session.add(run)

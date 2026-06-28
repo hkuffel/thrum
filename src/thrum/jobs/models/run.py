@@ -61,6 +61,12 @@ class Run(Base):
     inputs: Mapped[dict] = mapped_column(JSONB, default=dict)  # jsonb; store IDs, not objects
     output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # The Caller frozen at Enqueue and thawed into the Execution Scope (ADR-0024):
+    # the queue cannot supply a live Caller, so identity rides the Run across the
+    # gap. NULL == no frozen Caller (a materialized cron occurrence), thawed to the
+    # system default.
+    caller: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Per-call retries override: NULL means inherit from the Operation's default.
     # Set by op.enqueue(..., retries=N) as N+1 (attempt budget). The queue
     # projection is the only durable projection that writes this; non-durable

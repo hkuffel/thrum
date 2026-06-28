@@ -61,7 +61,7 @@ async def run_scoped(
         )
         return
 
-    caller = Caller.system()
+    caller = Caller.thaw(claimed.caller)
     capabilities = _capability_params(operation.fn, providers)
     failure: str | None = None
     try:
