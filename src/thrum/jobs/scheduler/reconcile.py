@@ -26,7 +26,7 @@ async def assert_declared_schedules(
 ) -> int:
     """Persist the declared Schedule set into the `schedules` table.
 
-    Keyed on Schedule identity (task_namespace, task_name, cron) so an
+    Keyed on Schedule identity (operation_namespace, operation_name, cron) so an
     operation may declare several recurrences without them colliding. INSERT …
     ON CONFLICT DO UPDATE so a changed tz/policy updates the matching
     recurrence in place, a new recurrence inserts, and a re-declared one
@@ -44,8 +44,8 @@ async def assert_declared_schedules(
         for spec in specs:
             rows.append(
                 {
-                    "task_namespace": ns,
-                    "task_name": name,
+                    "operation_namespace": ns,
+                    "operation_name": name,
                     "cron": spec.cron,
                     "timezone": spec.timezone,
                     "declared_duration": spec.declared_duration,
@@ -58,7 +58,7 @@ async def assert_declared_schedules(
 
     stmt = pg_insert(Schedule).values(rows)
     stmt = stmt.on_conflict_do_update(
-        constraint="uq_schedules_task_cron",
+        constraint="uq_schedules_operation_cron",
         set_={
             # `cron` is part of the conflict key, so it never changes on update.
             "timezone": stmt.excluded.timezone,

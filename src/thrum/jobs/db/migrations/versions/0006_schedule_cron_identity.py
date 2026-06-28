@@ -1,7 +1,7 @@
-"""schedules unique key: (task_namespace, task_name) -> (.., cron)
+"""schedules unique key: (operation_namespace, operation_name) -> (.., cron)
 
 A single operation may now declare several recurrences via repeated
-`op.schedule(...)` calls. The old `uq_schedules_task` constraint allowed only
+`op.schedule(...)` calls. The old `uq_schedules_operation` constraint allowed only
 one row per (namespace, name), so the reconcile upsert silently collapsed
 sibling schedules onto the last-declared one. Widening the unique key to
 include `cron` makes each recurrence its own row while the ON CONFLICT upsert
@@ -27,8 +27,8 @@ down_revision = "0005_run_max_attempts"
 branch_labels = None
 depends_on = None
 
-OLD_NAME = "uq_schedules_task"
-NEW_NAME = "uq_schedules_task_cron"
+OLD_NAME = "uq_schedules_operation"
+NEW_NAME = "uq_schedules_operation_cron"
 
 
 def _has_constraint(bind, name: str) -> bool:
@@ -52,7 +52,7 @@ def upgrade() -> None:
         op.create_unique_constraint(
             NEW_NAME,
             "schedules",
-            ["task_namespace", "task_name", "cron"],
+            ["operation_namespace", "operation_name", "cron"],
             schema=SCHEMA,
         )
 
@@ -62,15 +62,16 @@ def downgrade() -> None:
     if _has_constraint(bind, NEW_NAME):
         op.drop_constraint(NEW_NAME, "schedules", schema=SCHEMA, type_="unique")
     # The widened constraint may have allowed multiple cron rows per operation.
-    # The old (task_namespace, task_name) constraint cannot tolerate them, so
-    # collapse each operation to its earliest-inserted row before recreating it.
+    # The old (operation_namespace, operation_name) constraint cannot tolerate
+    # them, so collapse each operation to its earliest-inserted row before
+    # recreating it.
     bind.execute(
         sa.text(
             f'DELETE FROM "{SCHEMA}".schedules '
             "WHERE ctid NOT IN ("
             "SELECT MIN(ctid) FROM "
             f'"{SCHEMA}".schedules '
-            "GROUP BY task_namespace, task_name"
+            "GROUP BY operation_namespace, operation_name"
             ")"
         )
     )
@@ -78,6 +79,6 @@ def downgrade() -> None:
         op.create_unique_constraint(
             OLD_NAME,
             "schedules",
-            ["task_namespace", "task_name"],
+            ["operation_namespace", "operation_name"],
             schema=SCHEMA,
         )

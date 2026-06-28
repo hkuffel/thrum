@@ -165,8 +165,8 @@ async def materialize_schedules(session: AsyncSession, horizon: dt.timedelta) ->
             rows.append(
                 {
                     "schedule_id": schedule.id,
-                    "operation_namespace": schedule.task_namespace,
-                    "operation_name": schedule.task_name,
+                    "operation_namespace": schedule.operation_namespace,
+                    "operation_name": schedule.operation_name,
                     "trigger": Trigger.schedule,
                     "status": RunStatus.scheduled,
                     "fire_time": fire_time,

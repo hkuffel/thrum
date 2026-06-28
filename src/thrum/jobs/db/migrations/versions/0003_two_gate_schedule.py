@@ -3,7 +3,7 @@
 Replace the single `paused` boolean with two independent gates: the
 declaration gate (code-owned, written by reconcile) and the operational gate
 (control-plane-owned, reserved in v1). Add `last_declared_at` and the
-`uq_schedules_task` unique constraint on (task_namespace, task_name).
+`uq_schedules_operation` unique constraint on (operation_namespace, operation_name).
 
 Fresh databases already get the new columns from 0001's model-derived
 `create_all`, so each operation is guarded for idempotency.
@@ -85,16 +85,19 @@ def upgrade() -> None:
         )
     if _has_column(bind, "paused"):
         op.drop_column("schedules", "paused", schema=SCHEMA)
-    if not _has_constraint(bind, "uq_schedules_task"):
+    if not _has_constraint(bind, "uq_schedules_operation"):
         op.create_unique_constraint(
-            "uq_schedules_task", "schedules", ["task_namespace", "task_name"], schema=SCHEMA
+            "uq_schedules_operation",
+            "schedules",
+            ["operation_namespace", "operation_name"],
+            schema=SCHEMA,
         )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    if _has_constraint(bind, "uq_schedules_task"):
-        op.drop_constraint("uq_schedules_task", "schedules", schema=SCHEMA)
+    if _has_constraint(bind, "uq_schedules_operation"):
+        op.drop_constraint("uq_schedules_operation", "schedules", schema=SCHEMA)
     if not _has_column(bind, "paused"):
         op.add_column(
             "schedules",

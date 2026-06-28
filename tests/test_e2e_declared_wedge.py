@@ -61,8 +61,8 @@ async def test_e2e_declared_schedule_through_the_front_door(
 
     async with session_factory() as session:
         row = (await session.execute(select(Schedule))).scalars().one()
-    assert row.task_namespace == "e2e"
-    assert row.task_name == "send_receipts"
+    assert row.operation_namespace == "e2e"
+    assert row.operation_name == "send_receipts"
     assert row.cron == "* * * * *"
     assert row.declaration_active is True
     assert row.operationally_paused_at is None

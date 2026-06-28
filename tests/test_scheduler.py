@@ -32,8 +32,8 @@ HORIZON = dt.timedelta(hours=24)
 
 async def _add_schedule(session_factory, **kw) -> Schedule:
     defaults = dict(
-        task_namespace="billing",
-        task_name="send_receipts",
+        operation_namespace="billing",
+        operation_name="send_receipts",
         cron="0 * * * *",  # hourly
         timezone="UTC",
         declaration_active=True,
@@ -125,7 +125,7 @@ async def test_operational_gate_paused_materializes_nothing(session_factory):
         session_factory,
         cron="0 * * * *",
         timezone="UTC",
-        task_name="op_paused_task",
+        operation_name="op_paused_task",
         declaration_active=True,
         operationally_paused_at=dt.datetime.now(dt.UTC),
         operationally_paused_by="admin",
@@ -142,7 +142,7 @@ async def test_both_gates_active_materializes(session_factory):
         session_factory,
         cron="0 * * * *",
         timezone="UTC",
-        task_name="both_active_task",
+        operation_name="both_active_task",
         declaration_active=True,
     )
 
