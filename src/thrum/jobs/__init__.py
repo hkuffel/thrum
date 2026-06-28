@@ -13,6 +13,7 @@ authored primitive, projected onto the queue via `op.enqueue(...)`.
 
 from thrum.jobs.app import App, CompileError
 from thrum.jobs.enqueue import enqueue
+from thrum.jobs.providers import Caller, Provider, ProviderContext, db_provider
 from thrum.jobs.registry import (
     DeclaredSchedule,
     Operation,
@@ -22,10 +23,14 @@ from thrum.jobs.registry import (
 
 __all__ = [
     "App",
+    "Caller",
     "CompileError",
     "DeclaredSchedule",
     "Operation",
+    "Provider",
+    "ProviderContext",
     "Registry",
     "operation",
     "enqueue",
+    "db_provider",
 ]
