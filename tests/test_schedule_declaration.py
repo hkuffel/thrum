@@ -96,6 +96,8 @@ def test_duplicate_cron_across_timezones_raises() -> None:
     with pytest.raises(ValueError, match="Duplicate schedule cron"):
         dup_tz_op.schedule("0 2 * * *", tz="America/New_York")
 
+    assert len(dup_tz_op.declared_schedules) == 1
+
 
 def test_invalid_cron_raises_at_declaration() -> None:
     reg = Registry("sched_test_3")
