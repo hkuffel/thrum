@@ -22,7 +22,6 @@ from alembic import op
 from thrum.jobs.models import Effect
 from thrum.jobs.models.base import SCHEMA
 
-
 revision = "0008_effects"
 down_revision = "0007_schedule_op_rename"
 branch_labels = None
