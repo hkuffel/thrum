@@ -69,6 +69,36 @@ def test_many_schedules_per_operation() -> None:
     assert multi.declared_schedules[1].cron == "0 9 * * 1"
 
 
+def test_duplicate_cron_raises_at_declaration() -> None:
+    reg = Registry("sched_test_dup")
+
+    @reg.operation
+    def dup_op() -> None: ...
+
+    dup_op.schedule("0 2 * * *", tz="UTC")
+
+    with pytest.raises(ValueError, match="Duplicate schedule cron"):
+        dup_op.schedule("0 2 * * *", tz="UTC")
+
+    assert len(dup_op.declared_schedules) == 1
+
+
+def test_duplicate_cron_across_timezones_raises() -> None:
+    reg = Registry("sched_test_dup_tz")
+
+    @reg.operation
+    def dup_tz_op() -> None: ...
+
+    dup_tz_op.schedule("0 2 * * *", tz="UTC")
+
+    # uq_schedules_task_cron keys on cron alone, so a differing tz does not
+    # escape the collision.
+    with pytest.raises(ValueError, match="Duplicate schedule cron"):
+        dup_tz_op.schedule("0 2 * * *", tz="America/New_York")
+
+    assert len(dup_tz_op.declared_schedules) == 1
+
+
 def test_invalid_cron_raises_at_declaration() -> None:
     reg = Registry("sched_test_3")
 

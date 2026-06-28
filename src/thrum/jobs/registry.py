@@ -164,6 +164,14 @@ class Operation(Generic[P, R]):
         process-global schedule registry for Worker startup reconcile."""
         _validate_cron(cron)
         _validate_timezone(tz)
+        # The `uq_schedules_task_cron` constraint keys on (namespace, name, cron)
+        # alone, so a repeated cron — even under a different tz — would collide in
+        # the startup reconcile's bulk upsert. Reject it here, not as an opaque
+        # Postgres cardinality violation at Worker startup.
+        if any(existing.cron == cron for existing in self.declared_schedules):
+            raise ValueError(
+                f"Duplicate schedule cron {cron!r} on operation {self.key!r}"
+            )
         declared = DeclaredSchedule(
             cron=cron,
             timezone=tz,
