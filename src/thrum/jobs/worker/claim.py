@@ -4,7 +4,7 @@
 transaction insert an Attempt stamped with the lease and flip the Run to
 `running`. The caller owns the transaction boundary and must commit promptly so
 the row locks release before execution — the lease, not the row lock, governs
-liveness while the Task runs.
+liveness while the Operation runs.
 
 Both arms of the claimability predicate are live (ADR-0008):
     (status = 'pending'   AND next_attempt_at <= now())  -- enqueues + retries
@@ -36,7 +36,7 @@ class ClaimedRun:
 
     run_id: uuid.UUID
     attempt_id: uuid.UUID
-    task_key: str  # namespace.name
+    operation_key: str  # namespace.name
     inputs: dict
 
 
@@ -99,7 +99,7 @@ async def claim_runs(
             ClaimedRun(
                 run_id=run.id,
                 attempt_id=attempt.id,
-                task_key=f"{run.operation_namespace}.{run.operation_name}",
+                operation_key=f"{run.operation_namespace}.{run.operation_name}",
                 inputs=dict(run.inputs or {}),
             )
         )

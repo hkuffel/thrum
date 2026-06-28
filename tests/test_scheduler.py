@@ -327,7 +327,9 @@ async def test_e2e_schedule_materializes_claims_and_succeeds(session_factory):
         earliest.fire_time = func.now() - dt.timedelta(seconds=1)
         target_id = earliest.id
 
-    processed = await run_once(session_factory, "worker-live", 10, LEASE, tasks={task.key: task})
+    processed = await run_once(
+        session_factory, "worker-live", 10, LEASE, operations={task.key: task}
+    )
     assert processed == 1
     async with session_factory() as session:
         run = await session.get(Run, target_id)

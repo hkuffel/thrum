@@ -218,7 +218,7 @@ async def test_e2e_dead_worker_orphan_is_reaped_and_rerun(session_factory):
     from thrum.jobs.worker import run_once
 
     processed = await run_once(
-        session_factory, "worker-live", 10, LEASE, tasks={task.key: task}
+        session_factory, "worker-live", 10, LEASE, operations={task.key: task}
     )
     assert processed == 1
     async with session_factory() as session:

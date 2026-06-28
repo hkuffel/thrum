@@ -83,7 +83,7 @@ async def test_e2e_declared_schedule_through_the_front_door(
 
     # Claim → execute → record
     processed = await run_once(
-        session_factory, "worker-e2e", 10, LEASE, tasks=Registry._global
+        session_factory, "worker-e2e", 10, LEASE, operations=Registry._global
     )
     assert processed == 1
 

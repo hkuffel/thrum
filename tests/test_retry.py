@@ -239,7 +239,7 @@ async def test_e2e_task_succeeds_after_two_retries(session_factory):
     tasks = {task.key: task}
 
     for _ in range(3):  # fail, fail, succeed
-        await run_once(session_factory, "worker-1", 10, LEASE, tasks=tasks)
+        await run_once(session_factory, "worker-1", 10, LEASE, operations=tasks)
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -274,10 +274,10 @@ async def test_e2e_always_failing_task_exhausts_budget(session_factory):
     run_id = await _enqueue(session_factory, task.key)
     tasks = {task.key: task}
 
-    await run_once(session_factory, "worker-1", 10, LEASE, tasks=tasks)
-    await run_once(session_factory, "worker-1", 10, LEASE, tasks=tasks)
+    await run_once(session_factory, "worker-1", 10, LEASE, operations=tasks)
+    await run_once(session_factory, "worker-1", 10, LEASE, operations=tasks)
     # Budget spent — nothing left to claim.
-    processed = await run_once(session_factory, "worker-1", 10, LEASE, tasks=tasks)
+    processed = await run_once(session_factory, "worker-1", 10, LEASE, operations=tasks)
 
     assert processed == 0
     async with session_factory() as session:

@@ -95,7 +95,7 @@ async def test_claim_marks_running_and_stamps_lease(session_factory):
     assert len(claimed) == 1
     item = claimed[0]
     assert item.run_id == run_id
-    assert item.task_key == "billing.send_receipts"
+    assert item.operation_key == "billing.send_receipts"
     assert item.inputs == {"invoice_id": 1}
 
     async with session_factory() as session:
@@ -185,7 +185,7 @@ async def test_e2e_enqueue_runs_to_succeeded(session_factory):
     task = Task(fn=send, namespace="billing", name="send_receipts")
     run_id = await _enqueue(session_factory, task.key, invoice_id=7)
 
-    processed = await run_once(session_factory, "worker-1", 10, LEASE, tasks={task.key: task})
+    processed = await run_once(session_factory, "worker-1", 10, LEASE, operations={task.key: task})
 
     assert processed == 1
     async with session_factory() as session:
@@ -205,7 +205,7 @@ async def test_e2e_raising_task_records_failed(session_factory):
     task = Task(fn=boom, namespace="billing", name="broken")
     run_id = await _enqueue(session_factory, task.key)
 
-    processed = await run_once(session_factory, "worker-1", 10, LEASE, tasks={task.key: task})
+    processed = await run_once(session_factory, "worker-1", 10, LEASE, operations={task.key: task})
 
     assert processed == 1
     async with session_factory() as session:
@@ -219,5 +219,5 @@ async def test_e2e_raising_task_records_failed(session_factory):
 
 
 async def test_e2e_no_work_processes_nothing(session_factory):
-    processed = await run_once(session_factory, "worker-1", 10, LEASE, tasks={})
+    processed = await run_once(session_factory, "worker-1", 10, LEASE, operations={})
     assert processed == 0

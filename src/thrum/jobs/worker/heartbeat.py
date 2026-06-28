@@ -4,15 +4,15 @@
 One coroutine per Worker, not per Run: each tick bumps the lease for all of this
 Worker's open Attempts (`claimed_by = self AND ended_at IS NULL`) in one short
 transaction. It runs on a dedicated connection (separate from execution sessions
-and the leader's advisory-lock connection) so a Task holding a session open cannot
-starve lease renewal. Cadence is `lease_ttl / 3` (config knob), so two consecutive
-missed renewals are required before a live Run looks orphaned — slack against a
-momentarily busy loop without slowing real-orphan detection.
+and the leader's advisory-lock connection) so an Operation holding a session open
+cannot starve lease renewal. Cadence is `lease_ttl / 3` (config knob), so two
+consecutive missed renewals are required before a live Run looks orphaned — slack
+against a momentarily busy loop without slowing real-orphan detection.
 
-Known limitation (ADR-0013): a sync/CPU-bound Task that blocks the event loop can
-starve this coroutine and get itself falsely reaped → double execution. Accepted
-for now; at-least-once execution is the correctness backstop, and blocking Tasks
-belong on the thread/process-pool path, not yet implemented.
+Known limitation (ADR-0013): a sync/CPU-bound Operation that blocks the event loop
+can starve this coroutine and get itself falsely reaped → double execution.
+Accepted for now; at-least-once execution is the correctness backstop, and
+blocking Operations belong on the thread/process-pool path, not yet implemented.
 """
 
 from __future__ import annotations

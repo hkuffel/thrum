@@ -5,7 +5,7 @@ An orphan is an open Attempt (`ended_at IS NULL`) whose lease has lapsed
 (`lease_expires_at < now()`) — its Worker stopped heartbeating, presumed dead.
 The Reaper closes each such Attempt `abandoned` and returns its parent Run to a
 claimable state (`pending`, `next_attempt_at = now()`) unconditionally: a dead or
-rolling-deployed Worker is infrastructure failure, never the Task failing, so it
+rolling-deployed Worker is infrastructure failure, never the Operation failing, so it
 must not burn a retry (ADR-0020). The Attempt budget counts only
 `failed`/`timed_out`, which the Reaper never produces, so it computes no budget.
 

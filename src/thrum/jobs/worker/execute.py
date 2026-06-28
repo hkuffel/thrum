@@ -1,6 +1,6 @@
-"""Execute: resolve a claimed Run's Task and run its code.
+"""Execute: resolve a claimed Run's Operation and run its code.
 
-Pure with respect to the database — it takes a ClaimedRun and a task lookup,
+Pure with respect to the database — it takes a ClaimedRun and an operation lookup,
 invokes the user's `fn`, and returns a structured outcome. Async context only for
 now; ADR-0005's thread-pool / process-pool routing is out of scope.
 
@@ -34,20 +34,20 @@ class ExecutionResult:
     error: str | None  # traceback on failure
 
 
-async def execute_run(claimed: ClaimedRun, tasks: dict[str, Task]) -> ExecutionResult:
-    """Resolve the Task by `namespace.name` and invoke it. A resolution miss or a
-    raised exception both produce a `failed` outcome with a captured message —
-    never propagated, so the Worker loop keeps turning."""
-    task = tasks.get(claimed.task_key)
-    if task is None:
+async def execute_run(claimed: ClaimedRun, operations: dict[str, Task]) -> ExecutionResult:
+    """Resolve the Operation by `namespace.name` and invoke it. A resolution miss
+    or a raised exception both produce a `failed` outcome with a captured message
+    — never propagated, so the Worker loop keeps turning."""
+    operation = operations.get(claimed.operation_key)
+    if operation is None:
         return ExecutionResult(
             outcome=AttemptOutcome.failed,
             output=None,
-            error=f"Task {claimed.task_key!r} is not registered in this Worker",
+            error=f"Operation {claimed.operation_key!r} is not registered in this Worker",
         )
 
     try:
-        result = task.fn(**claimed.inputs)
+        result = operation.fn(**claimed.inputs)
         if inspect.isawaitable(result):
             result = await result
     except Exception:
@@ -65,7 +65,7 @@ async def execute_run(claimed: ClaimedRun, tasks: dict[str, Task]) -> ExecutionR
     # than aborting the recording transaction — a raise there would leave the
     # Run unrecorded and the Reaper would retry the same bad output forever.
     try:
-        ensure_serializable(output, owner=claimed.task_key, role="output")
+        ensure_serializable(output, owner=claimed.operation_key, role="output")
     except SerializationContractError as exc:
         return ExecutionResult(
             outcome=AttemptOutcome.failed, output=None, error=str(exc)
