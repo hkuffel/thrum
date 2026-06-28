@@ -66,16 +66,18 @@ async def run_scoped(
     async with session_factory() as session, AsyncExitStack() as stack:
         injected = {}
         ctx = ProviderContext(session=session)
-        for name, capability_type in capabilities:
-            injected[name] = await stack.enter_async_context(
-                providers[capability_type](ctx, caller)
-            )
-        # The handler stays inside the stack so it covers only the body and the
-        # commit, not Provider teardown: a teardown that raises after a committed
-        # success must propagate, never be re-recorded as a failure over the
-        # already-`succeeded` Run. Txn 2 nests inside the stack so teardown runs
-        # after commit on success and after rollback on a raised body.
+        # The try covers Provider setup through the commit so a Provider
+        # __aenter__ that raises is recorded as a failed Attempt, not propagated
+        # out of the batch loop. It deliberately ends before the stack unwinds:
+        # a teardown that raises after a committed success must propagate, never
+        # be re-recorded as a failure over the already-`succeeded` Run. Txn 2
+        # nests inside the stack so teardown runs after commit on success and
+        # after rollback on a raised body.
         try:
+            for name, capability_type in capabilities:
+                injected[name] = await stack.enter_async_context(
+                    providers[capability_type](ctx, caller)
+                )
             async with session.begin():
                 output = await _invoke(operation.fn, claimed.inputs, injected)
                 ensure_serializable(output, owner=claimed.operation_key, role="output")

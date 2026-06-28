@@ -183,6 +183,30 @@ async def test_providers_torn_down_on_failure_path(session_factory):
     assert events == ["enter", "exit"]
 
 
+async def test_provider_setup_raise_is_recorded_not_propagated(session_factory):
+    # A Provider __aenter__ failure is an unfilled Capability, not a worker
+    # death: record it `failed` so the batch loop keeps turning, never propagate.
+    @asynccontextmanager
+    async def exploding_setup(ctx, caller):
+        raise RuntimeError("setup boom")
+        yield  # unreachable; satisfies the asynccontextmanager generator shape
+
+    async def op(*, t: Telemetry) -> dict:
+        return {"ok": True}
+
+    task = Task(fn=op, namespace="probe", name="setup_boom")
+    run_id = await _enqueue(session_factory, task.key)
+    item = await _claim_one(session_factory)
+
+    await run_scoped(session_factory, item, {task.key: task}, {Telemetry: exploding_setup})
+
+    async with session_factory() as session:
+        run = await session.get(Run, run_id)
+        attempt = await session.get(Attempt, item.attempt_id)
+    assert run.status == RunStatus.failed
+    assert "setup boom" in attempt.error
+
+
 async def test_provider_teardown_raise_after_commit_preserves_success(session_factory):
     # A Provider teardown that raises after Txn 2 commits must propagate, not be
     # caught and re-recorded as a failure over the already-`succeeded` Run.
