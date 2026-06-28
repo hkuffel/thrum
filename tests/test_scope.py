@@ -336,6 +336,30 @@ async def test_boot_reconciles_declared_schedules(session_factory, migrated_dsn)
     assert row.declaration_active is True
 
 
+async def test_boot_reconciles_only_the_apps_own_schedules(session_factory, migrated_dsn):
+    # A foreign registry's schedule is declared in the same process; a scoped
+    # App must not reconcile it (or it would claim Runs it cannot execute).
+    mine = Registry("mine")
+    foreign = Registry("foreign")
+
+    @mine.operation
+    async def my_job(*, db: AsyncSession) -> dict: ...
+
+    @foreign.operation
+    async def their_job() -> dict: ...
+
+    my_job.schedule("* * * * *", tz="UTC")
+    their_job.schedule("* * * * *", tz="UTC")
+
+    app = App(registry=mine)
+    app.provide(AsyncSession, db_provider)
+    await Worker(WorkerConfig(dsn=migrated_dsn), app)._boot(session_factory)
+
+    async with session_factory() as session:
+        rows = (await session.execute(select(Schedule))).scalars().all()
+    assert [r.operation_namespace for r in rows] == ["mine"]
+
+
 # The Scope resolves operations + capabilities from the App, not Registry._global
 
 async def test_run_once_with_app_injects_db_end_to_end(session_factory):

@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING
 
 from thrum.jobs.app import App
 from thrum.jobs.config import SchedulerConfig, WorkerConfig
-from thrum.jobs.registry import Registry
 from thrum.jobs.worker.claim import claim_runs
 from thrum.jobs.worker.heartbeat import renew_leases
 from thrum.jobs.worker.scope import run_scoped
@@ -152,7 +151,14 @@ class Worker:
     async def _assert_schedules(self, session_factory: async_sessionmaker) -> None:
         from thrum.jobs.scheduler.reconcile import assert_declared_schedules
 
-        declared = Registry._global_schedules
+        # Reconcile only this App's own schedules, not the process-global
+        # accumulator: a scoped App(registry=...) must not reconcile (and then
+        # claim, and fail) another registry's schedules in the same process.
+        declared = {
+            op.key: op.declared_schedules
+            for op in self.app.operations.values()
+            if op.declared_schedules
+        }
         if not declared:
             return
         async with session_factory() as session, session.begin():
