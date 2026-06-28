@@ -1,14 +1,16 @@
-"""schedules unique key: (operation_namespace, operation_name) -> (.., cron)
+"""schedules unique key: (task_namespace, task_name) -> (.., cron)
 
 A single operation may now declare several recurrences via repeated
-`op.schedule(...)` calls. The old `uq_schedules_operation` constraint allowed only
+`op.schedule(...)` calls. The old `uq_schedules_task` constraint allowed only
 one row per (namespace, name), so the reconcile upsert silently collapsed
 sibling schedules onto the last-declared one. Widening the unique key to
 include `cron` makes each recurrence its own row while the ON CONFLICT upsert
 still updates a re-declared recurrence in place.
 
-Fresh databases already get the model-derived constraint from 0001's
-`create_all`, so this migration only fixes databases created before the rename.
+This predates the task_* -> operation_* column rename (0007), so it speaks the
+task_* names of its own era. Fresh databases already get the model-derived
+`uq_schedules_operation_cron` from 0001's `create_all`, so the constraint
+create here is guarded on the legacy task_* columns being present.
 
 Revision ID: 0006_schedule_cron_identity
 Revises: 0005_run_max_attempts
@@ -27,8 +29,21 @@ down_revision = "0005_run_max_attempts"
 branch_labels = None
 depends_on = None
 
-OLD_NAME = "uq_schedules_operation"
-NEW_NAME = "uq_schedules_operation_cron"
+OLD_NAME = "uq_schedules_task"
+NEW_NAME = "uq_schedules_task_cron"
+
+
+def _has_column(bind, column: str) -> bool:
+    return bool(
+        bind.execute(
+            sa.text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = :schema AND table_name = 'schedules' "
+                "AND column_name = :column"
+            ),
+            {"schema": SCHEMA, "column": column},
+        ).first()
+    )
 
 
 def _has_constraint(bind, name: str) -> bool:
@@ -48,11 +63,11 @@ def upgrade() -> None:
     bind = op.get_bind()
     if _has_constraint(bind, OLD_NAME):
         op.drop_constraint(OLD_NAME, "schedules", schema=SCHEMA, type_="unique")
-    if not _has_constraint(bind, NEW_NAME):
+    if _has_column(bind, "task_namespace") and not _has_constraint(bind, NEW_NAME):
         op.create_unique_constraint(
             NEW_NAME,
             "schedules",
-            ["operation_namespace", "operation_name", "cron"],
+            ["task_namespace", "task_name", "cron"],
             schema=SCHEMA,
         )
 
@@ -62,16 +77,15 @@ def downgrade() -> None:
     if _has_constraint(bind, NEW_NAME):
         op.drop_constraint(NEW_NAME, "schedules", schema=SCHEMA, type_="unique")
     # The widened constraint may have allowed multiple cron rows per operation.
-    # The old (operation_namespace, operation_name) constraint cannot tolerate
-    # them, so collapse each operation to its earliest-inserted row before
-    # recreating it.
+    # The old (task_namespace, task_name) constraint cannot tolerate them, so
+    # collapse each operation to its earliest-inserted row before recreating it.
     bind.execute(
         sa.text(
             f'DELETE FROM "{SCHEMA}".schedules '
             "WHERE ctid NOT IN ("
             "SELECT MIN(ctid) FROM "
             f'"{SCHEMA}".schedules '
-            "GROUP BY operation_namespace, operation_name"
+            "GROUP BY task_namespace, task_name"
             ")"
         )
     )
@@ -79,6 +93,6 @@ def downgrade() -> None:
         op.create_unique_constraint(
             OLD_NAME,
             "schedules",
-            ["operation_namespace", "operation_name"],
+            ["task_namespace", "task_name"],
             schema=SCHEMA,
         )
