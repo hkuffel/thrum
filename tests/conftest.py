@@ -68,7 +68,10 @@ async def session_factory(migrated_dsn: str):
     engine = make_async_engine(migrated_dsn)
     async with engine.begin() as conn:
         await conn.execute(
-            text("TRUNCATE thrum.attempts, thrum.runs, thrum.schedules RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE thrum.effects, thrum.attempts, thrum.runs, thrum.schedules "
+                "RESTART IDENTITY CASCADE"
+            )
         )
     try:
         yield async_sessionmaker(engine, expire_on_commit=False)
