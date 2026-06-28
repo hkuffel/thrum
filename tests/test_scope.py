@@ -11,6 +11,7 @@ state, never internal wiring.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as dt
 from contextlib import asynccontextmanager
 
@@ -450,3 +451,23 @@ async def test_scope_thaws_the_caller_stamped_at_enqueue(session_factory):
     # authority — no attenuation: the probe write committed unblocked.
     assert seen == [Caller.system()]
     assert await _probe_count(session_factory) == 1
+
+
+async def test_malformed_frozen_caller_records_failed_not_stuck(session_factory):
+    # A frozen Caller missing "subject" (schema drift, manual intervention) must
+    # be recorded as a failed Attempt, never propagate — or the Run hangs
+    # `running` and the Reaper re-claims the same bad row forever.
+    async def op(*, db: AsyncSession) -> dict:
+        return {"ok": True}
+
+    task = Task(fn=op, namespace="probe", name="bad_caller")
+    run_id = await _enqueue(session_factory, task.key)
+    item = dataclasses.replace(await _claim_one(session_factory), caller={"role": "no-subject"})
+
+    await run_scoped(session_factory, item, {task.key: task}, {AsyncSession: db_provider})
+
+    async with session_factory() as session:
+        run = await session.get(Run, run_id)
+        attempt = await session.get(Attempt, item.attempt_id)
+    assert run.status == RunStatus.failed
+    assert attempt.outcome == AttemptOutcome.failed

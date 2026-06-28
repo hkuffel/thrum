@@ -61,21 +61,23 @@ async def run_scoped(
         )
         return
 
-    caller = Caller.thaw(claimed.caller)
     capabilities = _capability_params(operation.fn, providers)
     failure: str | None = None
     try:
         async with session_factory() as session, AsyncExitStack() as stack:
             injected = {}
             ctx = ProviderContext(session=session)
-            # The inner try covers Provider setup through the commit so a
-            # Provider __aenter__ that raises is recorded as a failed Attempt,
-            # not propagated. It ends before the stack unwinds because a teardown
-            # that raises after a committed success must propagate, never be
-            # re-recorded over the already-`succeeded` Run. Txn 2 nests inside
-            # the stack so teardown runs after commit on success and after
-            # rollback on a raised body.
+            # The inner try covers Caller thaw and Provider setup through the
+            # commit so a malformed frozen Caller or a Provider __aenter__ that
+            # raises is recorded as a failed Attempt, not propagated — otherwise
+            # the Run hangs `running` and the Reaper re-claims the same bad row
+            # forever. It ends before the stack unwinds because a teardown that
+            # raises after a committed success must propagate, never be re-recorded
+            # over the already-`succeeded` Run. Txn 2 nests inside the stack so
+            # teardown runs after commit on success and after rollback on a raised
+            # body.
             try:
+                caller = Caller.thaw(claimed.caller)
                 for name, capability_type in capabilities:
                     injected[name] = await stack.enter_async_context(
                         providers[capability_type](ctx, caller)
