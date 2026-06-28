@@ -5,7 +5,7 @@ commit means it runs, rollback means it never existed.
 Critical: this happens in the APP process at creation time and executes nothing;
 execution is a separate two-process concern. The enqueued Run sits `pending`
 until a Worker process — running `thrum worker` somewhere, pointed at the same
-Postgres — claims it. Pass IDs, not live ORM objects; the Task re-fetches.
+Postgres — claims it. Pass IDs, not live ORM objects; the Operation re-fetches.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from thrum.jobs.models import Run, RunStatus, Trigger
-from thrum.jobs.registry import Task
+from thrum.jobs.registry import Operation
 from thrum.jobs.serialization import ensure_serializable
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 def enqueue(
     session: Session,
-    task: Task | str,
+    operation: Operation | str,
     *,
     max_attempts: int | None = None,
     **inputs: Any,
@@ -34,7 +34,7 @@ def enqueue(
     `op.enqueue(..., retries=N)` as N+1; NULL means inherit the Operation's
     default at execution time. Only the queue projection (enqueue) sets this;
     non-durable projections (future HTTP) must leave it NULL."""
-    key = task.key if isinstance(task, Task) else task
+    key = operation.key if isinstance(operation, Operation) else operation
 
     # The queue's input serialization boundary — inputs become the `inputs`
     # JSONB column, so reject a non-serializable value here, not in the encoder.
