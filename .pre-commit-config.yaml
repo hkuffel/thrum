@@ -1,0 +1,10 @@
+# See https://pre-commit.com for usage. Install the hooks with `pre-commit install`.
+# Ruff rev is pinned to the version in the dev group / uv.lock so the hooks match
+# local runs. Bump both together.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-check        # lint (autofixable rules get fixed)
+        args: [--fix]
+      - id: ruff-format       # formatter

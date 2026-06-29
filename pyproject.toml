@@ -50,6 +50,7 @@ thrum = "thrum.jobs.cli:main"
 [dependency-groups]
 dev = [
   "ruff>=0.4",
+  "pre-commit>=3.7",
   "pytest>=8",
   "pytest-asyncio>=0.23",
   "testcontainers[postgres]>=4", # real ephemeral Postgres in tests — mocking the DB tests nothing
