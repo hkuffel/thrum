@@ -24,6 +24,9 @@ docs/prd/
 docs/VISION.md
 docs/roadmap.local.md
 
+# Personal multi-agent build harness (local-only)
+.sandcastle/
+
 # OS / editor cruft
 .DS_Store
 *.swp
