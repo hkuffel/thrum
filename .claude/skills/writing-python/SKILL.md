@@ -1,6 +1,6 @@
 ---
 name: writing-python
-description: Conventions for writing good Python in the thrum repo — comment discipline, typing, control flow, imports, and module hygiene. Use when writing, reviewing, or refactoring Python in this repo, or when the user asks whether code is clean, idiomatic, or well-commented.
+description: Conventions for writing good Python in the thrum repo — comment discipline, docstrings, public-API documentation, typing, control flow, imports, and module hygiene. Use when writing, reviewing, or refactoring Python in this repo, when documenting a public API surface, or when the user asks whether code is clean, idiomatic, or well-commented.
 ---
 
 # Writing Python in thrum
@@ -80,6 +80,28 @@ durable doc, cite the doc.
 `thrum/jobs/worker/claim.py`'s module docstring is a good model for scope and
 tone — minus its `core-loop Q2/Q5` references, which are exactly the ephemeral
 citations to avoid.
+
+### Comment markers
+
+A handful of markers carry a fixed shape. Use them and nothing looser.
+
+- `# Ref: <url>` — an external durable artifact (spec section, PR, issue) that
+  justifies a workaround. Put it on the line above the code it explains.
+- `# TODO: <action> once <condition>` — a TODO names both the action and the
+  condition that retires it. A TODO with no exit condition is a wish, not a marker.
+- `# Vendored from <source> to <reason>` — provenance for copied code, so the next
+  reader knows where to resync it from and why it diverged.
+- Tooling suppressions are always specific: `# noqa: B004`, `# pragma: no cover`,
+  `# type: ignore[arg-type]`. Never blanket `# noqa` or bare `# type: ignore`.
+
+## Public API surface
+
+The rules above govern internal code. thrum's *user-facing* API — the public
+decorators, parameter builders, and classes a consumer imports and sees in tooltips
+or generated docs — follows a different, documentation-oriented style: per-parameter
+`Annotated[T, Doc(...)]`, markdown docstrings with a `## Example`, and almost no module
+docstrings. That style, distilled from FastAPI, is the one exception to the no-markdown
+rule above. See [public-api-docstrings.md](public-api-docstrings.md).
 
 ## Code standards
 
