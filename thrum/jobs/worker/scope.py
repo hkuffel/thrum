@@ -135,11 +135,7 @@ def _capability_params(fn, providers: dict[type, Provider]) -> list[tuple[str, t
     if not providers:
         return []
     model = classify(fn, capability_types=frozenset(providers))
-    return [
-        (p.name, p.annotation)
-        for p in model.parameters
-        if p.kind is ParamKind.CAPABILITY
-    ]
+    return [(p.name, p.annotation) for p in model.parameters if p.kind is ParamKind.CAPABILITY]
 
 
 async def _record_failure(

@@ -38,6 +38,7 @@ class FakeMailer:
 
 # core classification
 
+
 def test_positional_param_is_required_data() -> None:
     def fn(invoice_id: int) -> None: ...
 
@@ -100,6 +101,7 @@ def test_multiple_capabilities_each_classified() -> None:
 
 # the trap case
 
+
 def test_trap_keyword_only_optional_non_capability_is_optional_data() -> None:
     """The load-bearing rule: `*, since: date | None = None` is
     optional Data, NEVER a Capability — its keyword-only-with-default
@@ -148,6 +150,7 @@ def test_empty_capability_registry_makes_every_kwonly_optional_data() -> None:
 
 
 # realistic mixed signature
+
 
 def test_mixed_signature_classifies_all_three_kinds() -> None:
     def send_receipts(
@@ -201,6 +204,7 @@ def test_classification_matrix(fn, capability_types, expected) -> None:
 
 # input schema
 
+
 def test_input_schema_excludes_capability_params() -> None:
     """The input schema is the data-only signature — capability params
     are removed so an enqueue caller cannot supply them, and a missing
@@ -219,6 +223,7 @@ def test_input_schema_excludes_capability_params() -> None:
 
 def test_input_schema_bind_accepts_valid_inputs() -> None:
     def fn(customer_id: int, *, since: date | None = None) -> None: ...
+
     schema = classify(fn, capability_types=()).input_schema
 
     bound = schema.bind(customer_id=42, since=None)
@@ -227,6 +232,7 @@ def test_input_schema_bind_accepts_valid_inputs() -> None:
 
 def test_input_schema_bind_rejects_missing_required() -> None:
     def fn(customer_id: int) -> None: ...
+
     schema = classify(fn, capability_types=()).input_schema
 
     with pytest.raises(TypeError):
@@ -235,6 +241,7 @@ def test_input_schema_bind_rejects_missing_required() -> None:
 
 def test_input_schema_bind_rejects_misspelled_kwarg() -> None:
     def fn(customer_id: int) -> None: ...
+
     schema = classify(fn, capability_types=()).input_schema
 
     with pytest.raises(TypeError):
@@ -247,6 +254,7 @@ def test_input_schema_bind_rejects_capability_named_input() -> None:
     unexpected kwarg."""
 
     def fn(*, db: FakeSession) -> None: ...
+
     schema = classify(fn, capability_types=[FakeSession]).input_schema
 
     assert list(schema.signature.parameters) == []
@@ -255,6 +263,7 @@ def test_input_schema_bind_rejects_capability_named_input() -> None:
 
 
 # output type
+
 
 def test_output_type_captured() -> None:
     def fn() -> dict: ...
@@ -274,11 +283,13 @@ def test_output_type_empty_when_no_annotation() -> None:
 
 # accepts a Signature directly
 
+
 def test_classify_accepts_a_raw_signature() -> None:
     """Pure module — accepts either a callable or a Signature directly,
     so a caller that already has one need not re-introspect."""
 
     def fn(x: int) -> None: ...
+
     sig = inspect.signature(fn)
 
     model = classify(sig, capability_types=())

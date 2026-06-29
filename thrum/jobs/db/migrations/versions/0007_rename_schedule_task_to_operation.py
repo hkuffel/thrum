@@ -64,9 +64,7 @@ def upgrade() -> None:
             "schedules", "task_namespace", new_column_name="operation_namespace", schema=SCHEMA
         )
     if _has_column(bind, "task_name") and not _has_column(bind, "operation_name"):
-        op.alter_column(
-            "schedules", "task_name", new_column_name="operation_name", schema=SCHEMA
-        )
+        op.alter_column("schedules", "task_name", new_column_name="operation_name", schema=SCHEMA)
     if _has_constraint(bind, "uq_schedules_task_cron") and not _has_constraint(
         bind, "uq_schedules_operation_cron"
     ):
@@ -84,6 +82,4 @@ def downgrade() -> None:
             "schedules", "operation_namespace", new_column_name="task_namespace", schema=SCHEMA
         )
     if _has_column(bind, "operation_name") and not _has_column(bind, "task_name"):
-        op.alter_column(
-            "schedules", "operation_name", new_column_name="task_name", schema=SCHEMA
-        )
+        op.alter_column("schedules", "operation_name", new_column_name="task_name", schema=SCHEMA)

@@ -82,6 +82,7 @@ async def _write_probe(db: AsyncSession, note: str) -> None:
 
 # Success: the injected write and the completion record commit as one fact
 
+
 async def test_injected_session_write_commits_with_attempt(session_factory):
     await _reset_probe(session_factory)
 
@@ -107,6 +108,7 @@ async def test_injected_session_write_commits_with_attempt(session_factory):
 
 
 # Failure: Txn 2 rolls back; the Attempt is recorded in a separate transaction
+
 
 async def test_raised_body_rolls_back_and_records_failed(session_factory):
     await _reset_probe(session_factory)
@@ -150,6 +152,7 @@ async def test_non_serializable_output_fails_without_traceback(session_factory):
 
 
 # Providers are entered and exited on the stack on both paths
+
 
 async def test_providers_torn_down_on_success_path(session_factory):
     events: list[str] = []
@@ -266,6 +269,7 @@ async def test_provider_teardown_raise_after_commit_preserves_success(session_fa
 
 # Crash before commit: a worker death mid-Txn-2 lands nothing; the Reaper recovers
 
+
 async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
     await _reset_probe(session_factory)
     state = {"crash": True}
@@ -315,6 +319,7 @@ async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
 
 
 # Worker boot: compile fails fast, then schedules still reconcile
+
 
 async def test_boot_fails_fast_on_unresolvable_capability(session_factory, migrated_dsn):
     reg = Registry("boot")
@@ -372,6 +377,7 @@ async def test_boot_reconciles_only_the_apps_own_schedules(session_factory, migr
 
 # The Scope resolves operations + capabilities from the App, not Registry._global
 
+
 async def test_run_once_with_app_injects_db_end_to_end(session_factory):
     await _reset_probe(session_factory)
 
@@ -408,13 +414,14 @@ async def test_run_once_without_app_does_not_reach_global_registry(session_facto
     async with session_factory() as session:
         run = await session.get(Run, run_id)
         attempt = (
-            await session.execute(select(Attempt).where(Attempt.run_id == run_id))
-        ).scalars().one()
+            (await session.execute(select(Attempt).where(Attempt.run_id == run_id))).scalars().one()
+        )
     assert run.status == RunStatus.failed
     assert "not registered" in attempt.error
 
 
 # Caller freeze/thaw: the identity stamped at Enqueue is restored into the Scope
+
 
 def _capturing_db_provider(seen: list[Caller]):
     """The real `db` Provider, wrapped to record the Caller the Scope passes it —

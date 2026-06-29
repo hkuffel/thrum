@@ -63,9 +63,7 @@ class Scheduler:
             materialized = await materialize_schedules(session, self.config.horizon)
             missed = await mark_missed(session, self.config.effective_miss_grace)
             reaped = await reap_orphans(session)
-            stale_paused = await pause_stale_schedules(
-                session, self.config.stale_threshold
-            )
+            stale_paused = await pause_stale_schedules(session, self.config.stale_threshold)
         return SweepResult(
             materialized=materialized,
             missed=missed,

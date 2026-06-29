@@ -49,6 +49,7 @@ async def _force_lease_into_past(session_factory, attempt_id):
 
 # Heartbeat (real DB)
 
+
 async def test_heartbeat_renews_open_attempt(session_factory):
     await _enqueue(session_factory, "billing.send_receipts", invoice_id=1)
     item = await _claim_one(session_factory)
@@ -112,6 +113,7 @@ async def test_heartbeat_does_not_renew_closed_attempt(session_factory):
 
 # Leader election (real DB)
 
+
 async def test_exactly_one_session_holds_the_sweep_lock(migrated_dsn, session_factory):
     from thrum.jobs.db.engine import make_async_engine
 
@@ -133,6 +135,7 @@ async def test_exactly_one_session_holds_the_sweep_lock(migrated_dsn, session_fa
 
 
 # Reaper (real DB)
+
 
 async def test_reaper_closes_orphan_abandoned_and_requeues_run(session_factory):
     run_id = await _enqueue(session_factory, "billing.send_receipts", invoice_id=1)
@@ -189,6 +192,7 @@ async def test_reaped_run_is_immediately_reclaimable(session_factory):
 
 # End-to-end: Worker death -> reaped -> re-runs
 
+
 async def test_e2e_dead_worker_orphan_is_reaped_and_rerun(session_factory):
     def send(invoice_id):
         return {"emailed": invoice_id}
@@ -224,9 +228,7 @@ async def test_e2e_dead_worker_orphan_is_reaped_and_rerun(session_factory):
     async with session_factory() as session:
         run = await session.get(Run, run_id)
         attempts = (
-            (await session.execute(select(Attempt).where(Attempt.run_id == run_id)))
-            .scalars()
-            .all()
+            (await session.execute(select(Attempt).where(Attempt.run_id == run_id))).scalars().all()
         )
         assert run.status == RunStatus.succeeded
         assert run.output == {"emailed": 7}

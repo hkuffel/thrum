@@ -104,13 +104,17 @@ async def test_changed_cron_inserts_new_row(session_factory):
 
     async with session_factory() as s:
         rows = (
-            await s.execute(
-                select(Schedule).where(
-                    Schedule.operation_namespace == "ns",
-                    Schedule.operation_name == "recur",
+            (
+                await s.execute(
+                    select(Schedule).where(
+                        Schedule.operation_namespace == "ns",
+                        Schedule.operation_name == "recur",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert {r.cron for r in rows} == {"0 2 * * *", "30 3 * * *"}
 
 
@@ -169,13 +173,17 @@ async def test_concurrent_asserts_converge(session_factory):
 
     async with session_factory() as s:
         rows = (
-            await s.execute(
-                select(Schedule).where(
-                    Schedule.operation_namespace == "ns",
-                    Schedule.operation_name == "concurrent",
+            (
+                await s.execute(
+                    select(Schedule).where(
+                        Schedule.operation_namespace == "ns",
+                        Schedule.operation_name == "concurrent",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len(rows) == 1
 
 
@@ -196,13 +204,17 @@ async def test_multiple_schedules_per_operation_all_persist(session_factory):
     assert count == 2
     async with session_factory() as s:
         rows = (
-            await s.execute(
-                select(Schedule).where(
-                    Schedule.operation_namespace == "ns",
-                    Schedule.operation_name == "multi",
+            (
+                await s.execute(
+                    select(Schedule).where(
+                        Schedule.operation_namespace == "ns",
+                        Schedule.operation_name == "multi",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     by_cron = {r.cron: r for r in rows}
     assert set(by_cron) == {"0 2 * * *", "0 9 * * 1"}
     assert by_cron["0 2 * * *"].timezone == "UTC"
@@ -225,10 +237,10 @@ async def test_resibling_schedule_updates_only_its_row(session_factory):
         )
     async with session_factory() as s:
         first = (
-            await s.execute(
-                select(Schedule).where(Schedule.operation_name == "sib")
-            )
-        ).scalars().all()
+            (await s.execute(select(Schedule).where(Schedule.operation_name == "sib")))
+            .scalars()
+            .all()
+        )
     ids = {r.cron: r.id for r in first}
 
     async with session_factory() as s, s.begin():
@@ -238,10 +250,10 @@ async def test_resibling_schedule_updates_only_its_row(session_factory):
 
     async with session_factory() as s:
         rows = (
-            await s.execute(
-                select(Schedule).where(Schedule.operation_name == "sib")
-            )
-        ).scalars().all()
+            (await s.execute(select(Schedule).where(Schedule.operation_name == "sib")))
+            .scalars()
+            .all()
+        )
     by_cron = {r.cron: r for r in rows}
     assert set(by_cron) == {"0 2 * * *", "0 9 * * 1"}
     assert by_cron["0 2 * * *"].id == ids["0 2 * * *"]
@@ -260,11 +272,13 @@ async def test_empty_declared_set_is_noop(session_factory):
 @pytest.mark.asyncio
 async def test_policy_fields_persisted(session_factory):
     declared = {
-        "ns.full": [_spec(
-            sla=dt.timedelta(minutes=30),
-            declared_duration=dt.timedelta(minutes=5),
-            start_grace=dt.timedelta(minutes=10),
-        )]
+        "ns.full": [
+            _spec(
+                sla=dt.timedelta(minutes=30),
+                declared_duration=dt.timedelta(minutes=5),
+                start_grace=dt.timedelta(minutes=10),
+            )
+        ]
     }
 
     async with session_factory() as s, s.begin():

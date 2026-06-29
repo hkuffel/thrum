@@ -204,6 +204,7 @@ def test_operation_decorator_retries_default_is_zero() -> None:
 def test_operation_retry_policy_converts_retries_to_max_attempts() -> None:
     """retries=N maps to max_attempts=N+1 in the RetryPolicy so the single-attempt
     default (retries=0) keeps existing behavior unchanged."""
+
     @operation(retries=2)
     def send_receipts() -> None: ...
 
@@ -240,6 +241,7 @@ def test_operation_decorator_accepts_full_retry_curve() -> None:
 def test_op_enqueue_per_call_retries_override_stored_on_run() -> None:
     """op.enqueue(..., retries=N) stores max_attempts=N+1 on the Run so the
     Worker can honour it at execution time without touching the Operation."""
+
     @operation
     def send_receipts(invoice_id: int) -> None: ...
 
@@ -251,6 +253,7 @@ def test_op_enqueue_per_call_retries_override_stored_on_run() -> None:
 def test_op_enqueue_no_override_leaves_max_attempts_null() -> None:
     """Without a per-call override the Run's max_attempts is NULL — the Worker
     inherits the Operation's default durability policy."""
+
     @operation
     def send_receipts(invoice_id: int) -> None: ...
 
@@ -261,6 +264,7 @@ def test_op_enqueue_no_override_leaves_max_attempts_null() -> None:
 
 def test_op_enqueue_retries_zero_stored_as_max_attempts_one() -> None:
     """retries=0 override (one attempt, no retries) stores max_attempts=1."""
+
     @operation
     def send_receipts(invoice_id: int) -> None: ...
 
@@ -273,6 +277,7 @@ def test_op_enqueue_retries_not_treated_as_data_input() -> None:
     """retries= is a projection-control kwarg, not a data input — passing it
     must not appear in Run.inputs and must not be validated against the data
     schema (which has no `retries` param)."""
+
     @operation
     def send_receipts(invoice_id: int) -> None: ...
 
@@ -285,6 +290,7 @@ def test_non_durable_direct_call_does_not_apply_durability_config() -> None:
     """A non-durable projection (e.g. future HTTP) calls the Operation directly —
     no Run is created, durability defaults are irrelevant. Encoded here to pin
     that direct invocation bypasses all durability machinery."""
+
     @operation(retries=10)
     def add(a: int, b: int) -> int:
         return a + b

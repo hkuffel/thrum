@@ -44,7 +44,7 @@ class AttemptOutcome(enum.StrEnum):
     clean-drain release on deploy (routine)."""
 
     succeeded = "succeeded"
-    failed = "failed"       # the Operation raised
+    failed = "failed"  # the Operation raised
     timed_out = "timed_out"  # hard timeout where enforceable
     abandoned = "abandoned"  # reaped orphan — its Worker died (ADR-0013)
-    requeued = "requeued"    # released by clean drain on shutdown
+    requeued = "requeued"  # released by clean drain on shutdown

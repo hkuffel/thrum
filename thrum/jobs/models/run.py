@@ -40,9 +40,7 @@ class Run(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
 
     # nullable: ad-hoc enqueues and (v2) workflow steps have no Schedule.
-    schedule_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("schedules.id"), nullable=True
-    )
+    schedule_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("schedules.id"), nullable=True)
     # A nullable workflow_run_id FK is a trivial additive v2 migration with zero
     # backfill — deliberately omitted now, not foreclosed.
 

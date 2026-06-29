@@ -130,9 +130,7 @@ class Operation(Generic[P, R]):
         # the startup reconcile's bulk upsert. Reject it here, not as an opaque
         # Postgres cardinality violation at Worker startup.
         if any(existing.cron == cron for existing in self.declared_schedules):
-            raise ValueError(
-                f"Duplicate schedule cron {cron!r} on operation {self.key!r}"
-            )
+            raise ValueError(f"Duplicate schedule cron {cron!r} on operation {self.key!r}")
         declared = DeclaredSchedule(
             cron=cron,
             timezone=tz,

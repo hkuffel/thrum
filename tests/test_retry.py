@@ -51,6 +51,7 @@ async def _fail(session_factory, item, operation):
 
 # The pure curve (no DB)
 
+
 def test_backoff_no_jitter_is_capped_exponential():
     policy = RetryPolicy(initial_delay=1.0, backoff_factor=2.0, max_delay=300.0, jitter=False)
     # 1 → 2 → 4 → 8 ... then capped at 300.
@@ -90,6 +91,7 @@ def test_retry_policy_defaults_are_the_beachhead():
 
 
 # The budget decision in Record (real DB)
+
 
 async def test_failure_with_budget_remaining_requeues_with_backoff(session_factory):
     """A failing Operation with budget left returns to `pending` with a future
@@ -214,6 +216,7 @@ async def test_unresolved_operation_is_terminal_not_retried(session_factory):
 
 # End-to-end through run_once (real DB)
 
+
 def _flaky_operation(fails: int) -> Operation:
     """An Operation that raises its first `fails` invocations, then returns. Backoff is
     zeroed (initial_delay=0, jitter off) so each retry is immediately claimable,
@@ -247,10 +250,14 @@ async def test_e2e_operation_succeeds_after_two_retries(session_factory):
     async with session_factory() as session:
         run = await session.get(Run, run_id)
         attempts = (
-            await session.execute(
-                select(Attempt).where(Attempt.run_id == run_id).order_by(Attempt.attempt_number)
+            (
+                await session.execute(
+                    select(Attempt).where(Attempt.run_id == run_id).order_by(Attempt.attempt_number)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert run.status == RunStatus.succeeded
     assert run.output == {"ok": 3}

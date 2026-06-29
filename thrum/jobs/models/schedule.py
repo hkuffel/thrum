@@ -29,7 +29,9 @@ class Schedule(Base):
         # re-declared recurrence in place while still inserting sibling schedules
         # instead of collapsing them onto the last-declared one.
         UniqueConstraint(
-            "operation_namespace", "operation_name", "cron",
+            "operation_namespace",
+            "operation_name",
+            "cron",
             name="uq_schedules_operation_cron",
         ),
     )

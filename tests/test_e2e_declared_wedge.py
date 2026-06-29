@@ -42,9 +42,7 @@ def _clean_global_registry():
         Registry._global_schedules.update(saved_schedules)
 
 
-async def test_e2e_declared_schedule_through_the_front_door(
-    session_factory, migrated_dsn
-):
+async def test_e2e_declared_schedule_through_the_front_door(session_factory, migrated_dsn):
     reg = Registry("e2e")
 
     @reg.operation
@@ -76,8 +74,8 @@ async def test_e2e_declared_schedule_through_the_front_door(
     # this pass (the test doesn't sleep for an actual minute).
     async with session_factory() as session, session.begin():
         earliest = (
-            await session.execute(select(Run).order_by(Run.fire_time).limit(1))
-        ).scalars().one()
+            (await session.execute(select(Run).order_by(Run.fire_time).limit(1))).scalars().one()
+        )
         earliest.fire_time = func.now() - dt.timedelta(seconds=1)
         target_id = earliest.id
 
@@ -90,8 +88,10 @@ async def test_e2e_declared_schedule_through_the_front_door(
     async with session_factory() as session:
         run = await session.get(Run, target_id)
         attempt = (
-            await session.execute(select(Attempt).where(Attempt.run_id == target_id))
-        ).scalars().one()
+            (await session.execute(select(Attempt).where(Attempt.run_id == target_id)))
+            .scalars()
+            .one()
+        )
     assert run.status == RunStatus.succeeded
     assert run.output == {"sent": True}
     assert attempt.outcome == AttemptOutcome.succeeded

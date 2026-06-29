@@ -16,9 +16,7 @@ from thrum.jobs.models.enums import AttemptOutcome
 
 class Attempt(Base):
     __tablename__ = "attempts"
-    __table_args__ = (
-        UniqueConstraint("run_id", "attempt_number", name="uq_attempts_run_number"),
-    )
+    __table_args__ = (UniqueConstraint("run_id", "attempt_number", name="uq_attempts_run_number"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id"), index=True)

@@ -32,6 +32,7 @@ class Customer:
 
 # The shared value-level guard
 
+
 def test_serializable_scalars_and_containers_pass() -> None:
     ensure_serializable(
         {"id": 1, "when": date(2026, 1, 1), "amount": Decimal("4.20"), "tags": ["a"]},
@@ -69,6 +70,7 @@ def test_set_is_rejected_as_non_json() -> None:
 
 # Input boundary: enqueue rejects a non-serializable Data value
 
+
 def test_enqueue_rejects_non_serializable_input() -> None:
     # The guard fires before the session is used, so a sentinel session is safe.
     with pytest.raises(SerializationContractError, match="input 'customer'"):
@@ -93,6 +95,7 @@ def test_enqueue_accepts_serializable_input_up_to_the_db(monkeypatch) -> None:
 
 
 # The static lint reads the same notion of serializability
+
 
 def test_annotation_lint_agrees_with_runtime_guard() -> None:
     assert is_serializable_annotation(int)

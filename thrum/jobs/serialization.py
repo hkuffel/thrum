@@ -106,9 +106,7 @@ def is_serializable_annotation(annotation: Any) -> bool:
             return False
         if origin in (list, tuple, dict):
             return all(
-                is_serializable_annotation(a)
-                for a in get_args(annotation)
-                if a is not Ellipsis
+                is_serializable_annotation(a) for a in get_args(annotation) if a is not Ellipsis
             )
         return True  # other generics — be lenient
 

@@ -44,11 +44,14 @@ async def _add_schedule(session_factory, **kw) -> Schedule:
         session.add(sched)
     async with session_factory() as session:
         return (
-            await session.execute(select(Schedule).where(Schedule.cron == defaults["cron"]))
-        ).scalars().first()
+            (await session.execute(select(Schedule).where(Schedule.cron == defaults["cron"])))
+            .scalars()
+            .first()
+        )
 
 
 # Materialization
+
 
 async def test_materialize_creates_scheduled_runs_over_horizon(session_factory):
     sched = await _add_schedule(session_factory, cron="0 * * * *", timezone="UTC")
@@ -107,9 +110,7 @@ async def test_materialize_is_idempotent(session_factory):
 
 
 async def test_declaration_gate_inactive_materializes_nothing(session_factory):
-    await _add_schedule(
-        session_factory, cron="0 * * * *", timezone="UTC", declaration_active=False
-    )
+    await _add_schedule(session_factory, cron="0 * * * *", timezone="UTC", declaration_active=False)
 
     async with session_factory() as session, session.begin():
         inserted = await materialize_schedules(session, HORIZON)
@@ -190,6 +191,7 @@ async def test_dst_fall_back_fires_once(session_factory):
 
 # `scheduled` claim arm
 
+
 async def test_due_scheduled_run_is_claimed_and_flipped_running(session_factory):
     sched = await _add_schedule(session_factory)
     # A scheduled occurrence whose fire_time is already in the past.
@@ -238,6 +240,7 @@ async def test_future_scheduled_run_is_not_claimed(session_factory):
 
 
 # Missed-detection
+
 
 async def _add_scheduled_run(session_factory, *, fire_offset: dt.timedelta) -> Run:
     sched = await _add_schedule(session_factory)
@@ -302,6 +305,7 @@ async def test_missed_skips_already_claimed_run(session_factory):
 
 # End-to-end: the whole wedge
 
+
 async def test_e2e_schedule_materializes_claims_and_succeeds(session_factory):
     """Schedule → sweep materializes a due occurrence → Worker claims and runs it
     to `succeeded` — the cron wedge end to end against real Postgres."""
@@ -322,8 +326,8 @@ async def test_e2e_schedule_materializes_claims_and_succeeds(session_factory):
     # Force the earliest occurrence due now so the Worker can claim it this pass.
     async with session_factory() as session, session.begin():
         earliest = (
-            await session.execute(select(Run).order_by(Run.fire_time).limit(1))
-        ).scalars().one()
+            (await session.execute(select(Run).order_by(Run.fire_time).limit(1))).scalars().one()
+        )
         earliest.fire_time = func.now() - dt.timedelta(seconds=1)
         target_id = earliest.id
 
@@ -334,8 +338,10 @@ async def test_e2e_schedule_materializes_claims_and_succeeds(session_factory):
     async with session_factory() as session:
         run = await session.get(Run, target_id)
         attempt = (
-            await session.execute(select(Attempt).where(Attempt.run_id == target_id))
-        ).scalars().one()
+            (await session.execute(select(Attempt).where(Attempt.run_id == target_id)))
+            .scalars()
+            .one()
+        )
         assert run.status == RunStatus.succeeded
         assert run.output == {"sent": True}
         assert attempt.outcome == AttemptOutcome.succeeded

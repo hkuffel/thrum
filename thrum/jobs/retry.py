@@ -28,10 +28,10 @@ class RetryPolicy:
     unchanged."""
 
     max_attempts: int = 1
-    initial_delay: float = 1.0     # seconds before the first retry
-    max_delay: float = 300.0       # ceiling on the exponential envelope
-    backoff_factor: float = 2.0    # exponential base
-    jitter: bool = True            # full jitter: spread over [0, ceiling]
+    initial_delay: float = 1.0  # seconds before the first retry
+    max_delay: float = 300.0  # ceiling on the exponential envelope
+    backoff_factor: float = 2.0  # exponential base
+    jitter: bool = True  # full jitter: spread over [0, ceiling]
 
 
 def backoff_delay(
