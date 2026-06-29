@@ -61,7 +61,7 @@ cannot be looked up. If the reasoning matters, state the reasoning; if it lives 
 durable doc, cite the doc.
 
 ```python
-# WRONG (see src/thrum/jobs/worker/claim.py): cites a session artifact
+# WRONG (see thrum/jobs/worker/claim.py): cites a session artifact
 # Postgres is the clock authority (core-loop Q5): derive the lease window from
 # the DB clock, not the Worker's wall clock.
 
@@ -77,7 +77,7 @@ durable doc, cite the doc.
 - A correctness-critical subtlety (concurrency, clock authority, transaction boundary).
 - A module docstring stating the file's responsibility and the contract it upholds.
 
-`src/thrum/jobs/worker/claim.py`'s module docstring is a good model for scope and
+`thrum/jobs/worker/claim.py`'s module docstring is a good model for scope and
 tone — minus its `core-loop Q2/Q5` references, which are exactly the ephemeral
 citations to avoid.
 

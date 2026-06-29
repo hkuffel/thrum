@@ -18,7 +18,7 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 │   ├── 0003-eager-run-materialization.md
 │   ├── 0005-worker-execution-model.md
 │   └── ...
-└── src/
+└── thrum/
 ```
 
 ## Use the glossary's vocabulary

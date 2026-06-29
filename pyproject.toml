@@ -61,12 +61,12 @@ Repository = "https://github.com/hkuffel/thrum"
 Issues = "https://github.com/hkuffel/thrum/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/thrum"]
+packages = ["thrum"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = [".", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
