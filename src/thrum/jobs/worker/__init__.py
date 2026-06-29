@@ -1,21 +1,14 @@
 """The Worker (CONTEXT.md): a standalone process that loads the user's Operation
-code, claims due Runs from Postgres, and executes them out-of-process from the
-app. One asyncio event loop (ADR-0005).
+code, claims due Runs from Postgres, and executes them out-of-process on one
+asyncio loop (ADR-0005).
 
-Around the enqueue → claim → execute → record path it runs the lease-recovery
-substrate: a per-Worker Heartbeat coroutine renewing every open Attempt's lease on
-a dedicated connection (ADR-0013); leader election, where each Worker contends for
-a session-scoped advisory lock on its own connection (ADR-0007); and the
-leader-gated sweep, where the winner materializes the horizon, marks missed
-occurrences, and reaps orphaned Attempts (ADR-0013/0020). Claim handles both the
-`pending` and `scheduled` arms, so cron work flows end to end. An
-Operation-attributable failure does not fail terminally on the first raise:
-Record returns the Run to
-`pending` with a backed-off `next_attempt_at` until its Attempt budget is spent
+Around the claim → execute → record path it runs the lease-recovery substrate: a
+per-Worker heartbeat renewing open leases (ADR-0013), leader election for the
+scheduler role (ADR-0007), and the leader-gated sweep that materializes, marks
+missed, and reaps (ADR-0013/0020). Claim serves both the `pending` and `scheduled`
+arms, so cron work flows end to end, and an Operation-attributable failure retries
+with backoff until its Attempt budget is spent rather than failing on first raise
 (ADR-0020/0021).
-
-Not yet implemented: thread/process-pool execution contexts (and hardening the
-heartbeat against loop-starvation), graceful drain (`requeued`), and lineage.
 """
 
 from __future__ import annotations

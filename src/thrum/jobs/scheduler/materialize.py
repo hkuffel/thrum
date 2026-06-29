@@ -1,28 +1,16 @@
 """Materialization (ADR-0003 / ADR-0015): the cron wedge.
 
-On each leader sweep tick, expand every non-paused Schedule's cron over the
-Materialization Horizon and pre-create a `scheduled` Run per occurrence. Because
-those Runs are rows in Postgres independent of the leader's liveness, the next
-~24h of work survives scheduler downtime — and an occurrence that should have
-fired but didn't becomes a row in the wrong state the sweep can mark `missed`,
-not an absent row nobody notices (the crontab blindness Thrum sells against).
+Each leader sweep expands every active Schedule's cron over the Materialization
+Horizon and pre-creates one `scheduled` Run per occurrence. Those Runs are
+Postgres rows independent of the leader's liveness, so the next ~24h of work
+survives scheduler downtime — and an occurrence that should have fired but didn't
+is a row the sweep can mark `missed`, the crontab blindness Thrum sells against.
 
-Timezone discipline (ADR-0015): cron expansion runs in Python on naive local
-wall-clock datetimes (croniter never sees a timezone); the local→UTC `fire_time`
-resolution happens in Postgres via `AT TIME ZONE`, so Postgres's bundled `tzdata`
-is the single authority and there is no zoneinfo-vs-tzdata skew.
-
-DST policy, applied in `resolve_fire_times`. A spring-forward time (local time
-that does not exist) shifts forward to the next valid instant (02:30 → 03:00) so
-a daily job still runs that day; silently skipping it would look exactly like the
-missed-run failure Thrum exists to flag. A fall-back time (local time that occurs
-twice) fires once: croniter emits the wall-clock once and `AT TIME ZONE` resolves
-it to a single instant, so double-firing cannot occur.
-
-Idempotency (ADR-0003): insert is `INSERT … ON CONFLICT (schedule_id, fire_time)
-DO NOTHING`. Re-running the sweep — or a leader dying mid-materialize and another
-re-asserting the horizon — can never double-create an occurrence; idempotency
-lives in the schema (the unique constraint), not in scheduler bookkeeping.
+Cron expands on naive local wall-clock datetimes and Postgres resolves local→UTC
+via `AT TIME ZONE`, so its bundled tzdata is the sole timezone authority and
+`resolve_fire_times` owns the DST policy (ADR-0015). Inserts are ON CONFLICT DO
+NOTHING on (schedule_id, fire_time), so idempotency lives in the unique
+constraint, not in scheduler bookkeeping (ADR-0003).
 """
 
 from __future__ import annotations

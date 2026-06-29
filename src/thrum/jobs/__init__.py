@@ -1,14 +1,10 @@
-"""thrum.jobs — the durable background-job slice (VISION §"first product slice").
+"""thrum.jobs — the durable job slice: cron, queues, and (later) workflows as one
+primitive, the Run, backed by your own Postgres.
 
-A Postgres-native job runner: cron, queues, and (later) workflows as one
-primitive (the Run), backed by your own Postgres. This is the framework's first
-transport projection — "a job is an operation projected onto a queue." This
-package re-exports only the lightweight SDK surface (Registry + Operation +
-transactional enqueue). It must NOT import the Worker, the scheduler, or the
-server at module load — see the import-discipline law in pyproject.toml.
-
-The authoring API is `@operation` / `@registry.operation` (ADR-0023): one
-authored primitive, projected onto the queue via `op.enqueue(...)`.
+This is the framework's first transport projection — a job is an `@operation`
+projected onto a queue (ADR-0023). The package re-exports only the lightweight SDK
+surface (Registry, Operation, transactional enqueue) and must not import the
+Worker, scheduler, or server at load time (import-discipline law).
 """
 
 from thrum.jobs.app import App, CompileError

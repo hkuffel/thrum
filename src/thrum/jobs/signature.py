@@ -1,26 +1,17 @@
-"""Signature model — the pure I/O-free deep module that classifies an Operation's
+"""Signature model — the pure, I/O-free module that classifies an Operation's
 parameters and derives its data contract (ADR-0023).
 
-Given a function signature and the injected set of registered capability types,
-every parameter falls into one of three buckets. REQUIRED_DATA is positional
-(positional-only or positional-or-keyword): the required inputs every transport
-must carry. OPTIONAL_DATA is keyword-only with an annotated type not in the
-registered-capability set; this includes the trap case `*, since: date | None =
-None`, where keyword-only-with-default mimics an injectable and only the
-type-membership check guards the misread. CAPABILITY is keyword-only with an
-annotated type in the registered-capability set; both conditions are necessary,
-since a capability-typed positional param is required Data here (Compile fails it
-as a structural error).
+Given a signature and the injected set of registered capability types, each
+parameter is REQUIRED_DATA (positional — inputs every transport must carry),
+CAPABILITY (keyword-only with a type in the registered set — framework-injected),
+or OPTIONAL_DATA (any other keyword-only param). The type-membership check is what
+separates an optional input from a capability and guards the `*, since: date |
+None = None` trap.
 
-The capability-type lookup is an injected dependency — this module only reads it;
-populating it is execution-side work. v1 callers pass an empty set, so every
-keyword-only param falls through to optional Data; the same code path tightens
-once Compile hands the real registry in.
-
-From the classification we derive the Operation's input schema (a data-only
-signature) and capture its output type. The input schema is what `op.enqueue`
-validates `**inputs` against, so missing/misspelled inputs and capability-named
-kwargs fail at the call, not later in the worker.
+The capability set is injected, not discovered here, so v1 callers pass an empty
+set and the same path tightens once Compile supplies the real registry. From the
+classification this derives the input schema `op.enqueue` validates against, so
+bad inputs fail at the call rather than in the Worker.
 """
 
 from __future__ import annotations

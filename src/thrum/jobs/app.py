@@ -1,28 +1,14 @@
-"""App — the projection host and phase-two validation finalizer (ADR-0023).
+"""App — projection host and phase-two validation finalizer (ADR-0023).
 
-`App` is distinct from `Registry`: a Registry owns identity (it declares the
-namespace Operations are authored under); the App owns transports and
-finalization. Naming and reaching stay separate as more transports arrive.
+A Registry owns identity; an App owns transports and the compile step, so naming
+and reaching stay separate as more transports arrive. `compile()` is phase two of
+two-phase validation: decoration does phase one, but resolving each Operation's
+capabilities and linting its serialization boundary can only run once the
+capability registry is populated, so they wait for startup. Failures aggregate
+into one `CompileError`; compile is idempotent, and `ensure_compiled()` is the
+on-first-start backstop.
 
-`app.compile()` is the second phase of two-phase validation. Phase one runs at
-decoration (import time): capture the signature, register identity, fail-fast
-on collision and cron/tz rules. Phase two can only run once the capability
-registry is populated, so it is deferred to startup. Compile resolves each
-Operation's capabilities against the registered capability types and fails fast
-on three residual checks. A capability-typed param placed positionally is a
-structural error, since keyword-only is necessary for injection. A keyword-only
-param with no default whose type matches no registered capability looks
-injectable but nothing can supply it — an optional Data flag must carry a
-default (the `since: date | None = None` trap). Non-serializable Data or output
-fails because every transport crosses a serialization boundary.
-
-Compile is idempotent — the in-memory validated registry is produced once; a
-later call (explicit or the implicit-on-first-start backstop) is a harmless
-no-op. It is exposed explicitly as `app.compile()` for tests and tooling, and
-`ensure_compiled()` is the seam first app/worker start invokes.
-
-SDK-core surface: stdlib only, no Worker/server imports (the import-discipline
-law).
+Stdlib only, no Worker or server imports (import-discipline law).
 """
 
 from __future__ import annotations

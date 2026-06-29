@@ -1,18 +1,14 @@
-"""Heartbeat (CONTEXT.md / ADR-0013): the periodic renewal of a running Run's
-`lease_expires_at` by its executing Worker, proving liveness.
+"""Heartbeat (CONTEXT.md / ADR-0013): renew a running Run's lease to prove liveness.
 
-One coroutine per Worker, not per Run: each tick bumps the lease for all of this
-Worker's open Attempts (`claimed_by = self AND ended_at IS NULL`) in one short
-transaction. It runs on a dedicated connection (separate from execution sessions
-and the leader's advisory-lock connection) so an Operation holding a session open
-cannot starve lease renewal. Cadence is `lease_ttl / 3` (config knob), so two
-consecutive missed renewals are required before a live Run looks orphaned — slack
-against a momentarily busy loop without slowing real-orphan detection.
+One coroutine per Worker, not per Run: each tick bumps `lease_expires_at` for all
+of this Worker's open Attempts in one short transaction, on a dedicated connection
+so an Operation holding its session open cannot starve renewal. Cadence is
+`lease_ttl / 3`, so two missed renewals are needed before a live Run looks
+orphaned.
 
-Known limitation (ADR-0013): a sync/CPU-bound Operation that blocks the event loop
-can starve this coroutine and get itself falsely reaped → double execution.
-Accepted for now; at-least-once execution is the correctness backstop, and
-blocking Operations belong on the thread/process-pool path, not yet implemented.
+A sync, CPU-bound Operation that blocks the loop can still starve this coroutine
+and be falsely reaped into double execution (ADR-0013); at-least-once execution is
+the backstop until the thread/process-pool path exists.
 """
 
 from __future__ import annotations

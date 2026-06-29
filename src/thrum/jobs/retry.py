@@ -1,17 +1,13 @@
-"""Retry policy + backoff curve (ADR-0021). Capped exponential with full jitter.
+"""Retry policy and backoff curve (ADR-0021): capped exponential with full jitter.
 
-Lives at the SDK-core weight (stdlib only, no Worker/server imports — the
-import-discipline law in pyproject.toml) because `RetryPolicy` is a property of an
-Operation, which is core surface. Record (Worker side) imports `backoff_delay`
-from here; the Operation references `RetryPolicy` from here. Pure with respect to the
-database and the clock: `backoff_delay` returns a `timedelta` that Record adds to
-Postgres `now()` to set `next_attempt_at`. The random source is injectable so
-jitter is deterministic under test.
+Full jitter (uniform in `[0, ceiling]`, per AWS "Exponential Backoff And Jitter")
+exists to break synchronized retries: cron materializes occurrences in lockstep
+(ADR-0003), so a batch failing against one flapping downstream would otherwise
+retry in lockstep forever. The curve is pure with respect to the clock and DB —
+`backoff_delay` returns a `timedelta` Record adds to Postgres `now()` — and its
+random source is injectable so jitter is deterministic under test.
 
-The curve exists to defuse a thundering herd: cron materializes synchronized
-occurrences (ADR-0003), so a batch failing against one flapping downstream would,
-without jitter, retry in lockstep forever. Full jitter (uniform in `[0, ceiling]`,
-per AWS "Exponential Backoff And Jitter") decorrelates them across the envelope.
+Stdlib only, no Worker or server imports (import-discipline law).
 """
 
 from __future__ import annotations

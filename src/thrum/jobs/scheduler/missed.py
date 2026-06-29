@@ -1,21 +1,15 @@
 """Missed-detection (ADR-0003 / CONTEXT.md): the state that defeats crontab
 blindness.
 
-A `scheduled` Run whose `fire_time` passed without it transitioning to `running`
-is the central differentiator made observable — a row in the wrong state, not an
-absent row nobody notices. The sweep marks it `missed`: a first-class terminal
-lifecycle state, not a derived inference.
+A `scheduled` Run whose `fire_time` passed without it going `running` is the
+central differentiator — a row in the wrong state, not an absent row nobody
+notices. The sweep marks it `missed`, a first-class terminal state.
 
-The gate is the Miss-detection Grace, an internal operational tolerance, not the
-per-Schedule Start Grace SLO knob (CONTEXT.md). It is floored at ≥ one sweep
-interval (`SchedulerConfig.effective_miss_grace`) so ordinary scheduling jitter —
-a Run claimable-but-not-yet-claimed when a sweep fires — can never manufacture a
-false `missed`. Decoupling it from the SLO knob means tightening an SLO can never
-make this hard terminal transition trigger-happy.
-
-The predicate is evaluated DB-side against Postgres `now()`; a Run already claimed
-(flipped to `running` by the `scheduled` arm of Claim) before the grace elapses no
-longer matches `status = 'scheduled'` and is safe.
+The gate is the Miss-detection Grace, an internal tolerance distinct from the
+per-Schedule Start Grace SLO knob (CONTEXT.md). It is floored at one sweep interval
+so ordinary scheduling jitter can never manufacture a false `missed`, and keeping
+it separate from the SLO knob stops a tightened SLO from making this terminal
+transition trigger-happy. The predicate evaluates DB-side against Postgres `now()`.
 """
 
 from __future__ import annotations
