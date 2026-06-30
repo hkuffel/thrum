@@ -1,5 +1,11 @@
 # Serialization binds the Operation: JSON-serializable Data and output, IDs not objects
 
+> **Status: superseded by [ADR-0029](0029-addressability-and-coherent-projection.md).**
+> The "IDs not objects" convention survives as the *identity codec*, but the
+> central claim below — that JSON-serializability binds the Operation
+> *universally* — is replaced by **addressability** (a Codec contract) owed only
+> by **durable** projections, plus **coherent projection** for the rest.
+
 An Operation is authored once and *projected* onto many transports — the queue (a `Run` row), HTTP (a request/response body), MCP (tool args/result), the CLI (argv). Every one of those crosses a **serialization boundary**: the values handed in and the value handed back must survive a round-trip as JSON. We decided this is a property of the **Operation itself** — its **Data** (inputs) and its **output** type — not a quirk of any single projection. An Operation whose Data or output is not JSON-serializable simply isn't projectable, which breaks the framework's one promise that the same code reaches the queue, HTTP, MCP, and CLI without surprise.
 
 The concrete rule the developer lives by: **pass IDs, not objects.** Type Data as ID newtypes (`CustomerId`), not live ORM rows; the Operation re-fetches what it needs through its injected `db` Capability at execution. The same constraint extends to the output type, because `Run.output` is JSONB, HTTP encodes it, and MCP returns it.
