@@ -23,9 +23,6 @@ if TYPE_CHECKING:
 async def project(
     app: App, operation: Operation, dsn: str, argv: list[str], *, as_json: bool = False
 ) -> str:
-    """Decode argv into the Operation's inputs, run inline through the Execution
-    Scope on a system Caller, and encode the output. Creates no Run, Attempt, or
-    Effect."""
     inputs = decode_argv(operation, argv, capability_types=frozenset(app.providers))
     engine = make_async_engine(dsn)
     try:
@@ -39,16 +36,7 @@ async def project(
 def decode_argv(
     operation: Operation, argv: list[str], *, capability_types: frozenset[type] = frozenset()
 ) -> dict[str, Any]:
-    """Bind argv against the Operation's data-only input schema: bare tokens fill
-    required params in order, `--name value` / `--name=value` fill the rest, each
-    coerced to its annotated scalar type.
-
-    Classified fresh against the projection's registered `capability_types`, so a
-    Capability param (`db`) is stripped from the schema rather than mistaken for an
-    input."""
     model = classify(operation.fn, capability_types=capability_types)
-    # The classifier's resolved (non-string) annotations drive coercion; the raw
-    # signature would carry PEP 563 strings.
     annotations = {
         p.name: p.annotation for p in model.parameters if p.kind is not ParamKind.CAPABILITY
     }
@@ -82,7 +70,6 @@ def decode_argv(
 
 def _coerce(value: str, annotation: Any) -> Any:
     if get_origin(annotation) in (Union, types.UnionType):
-        # Optional[T] / T | None — coerce against the first non-None member.
         for arg in get_args(annotation):
             if arg is not type(None):
                 return _coerce(value, arg)
@@ -114,9 +101,6 @@ def encode_table(output: Any) -> str:
 
 
 def _rows(output: Any) -> list[dict[str, Any]]:
-    """Normalize any output to a list of row dicts for tabular rendering: a list
-    of records stays a list, a lone record becomes one row, a scalar a `value`
-    column."""
     jsonable = _to_jsonable(output)
     if jsonable is None:
         return []
@@ -128,7 +112,6 @@ def _rows(output: Any) -> list[dict[str, Any]]:
 
 
 def _to_jsonable(value: Any) -> Any:
-    """Reduce read types and stdlib scalars to JSON-native values."""
     if is_dataclass(value) and not isinstance(value, type):
         return {f.name: _to_jsonable(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, dict):

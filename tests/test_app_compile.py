@@ -1,16 +1,3 @@
-"""Unit tests for the App object and the `app.compile()` finalizer
-(ADR-0023).
-
-`App` is the projection host, distinct from `Registry`: it owns operation
-discovery and the phase-two validation finalizer. `compile()` resolves each
-Operation's capabilities against the registered capability types and fails fast
-on the residual checks — a positional capability, an unresolved injectable, and
-non-serializable Data/output. It is idempotent and runs implicitly on first
-start (`ensure_compiled`) as well as explicitly.
-
-No Postgres, no worker — compile is a pure in-memory pass over the registry.
-"""
-
 from __future__ import annotations
 
 from datetime import date
@@ -22,11 +9,11 @@ from thrum import App, CompileError, Registry, operation
 
 
 class FakeSession:
-    """A registered capability type."""
+    pass
 
 
 class NotSerializable:
-    """A plain class — not JSON-serializable, used as bad Data/output."""
+    pass
 
 
 CustomerId = NewType("CustomerId", int)
@@ -36,9 +23,6 @@ def _app_with_db() -> App:
     app = App()
     app.provide(FakeSession, object())
     return app
-
-
-# App is distinct from Registry, owns discovery
 
 
 def test_app_discovers_global_operations() -> None:
@@ -63,29 +47,21 @@ def test_app_scoped_to_a_registry_sees_only_its_operations() -> None:
     assert set(app.operations) == {"billing.charge"}
 
 
-# a clean operation compiles
-
-
 def test_compile_passes_clean_operation() -> None:
     @operation
     def send_receipts(
         customer_id: CustomerId, *, since: date | None = None, db: FakeSession
     ) -> dict: ...
 
-    _app_with_db().compile()  # no raise
+    _app_with_db().compile()
 
 
 def test_compile_resolves_capability_against_registered_type() -> None:
-    """With FakeSession registered, the keyword-only `db` is a Capability — it
-    is stripped from Data and not flagged as an unresolved injectable."""
 
     @operation
     def op(order_id: int, *, db: FakeSession) -> None: ...
 
-    _app_with_db().compile()  # no raise
-
-
-# fail-fast: positional capability
+    _app_with_db().compile()
 
 
 def test_compile_fails_on_positional_capability() -> None:
@@ -96,12 +72,7 @@ def test_compile_fails_on_positional_capability() -> None:
         _app_with_db().compile()
 
 
-# fail-fast: unresolved injectable
-
-
 def test_compile_fails_on_unresolved_injectable() -> None:
-    """A keyword-only param with no default whose type is registered nowhere:
-    it looks injectable but nothing can supply it."""
 
     @operation
     def op(order_id: int, *, mailer: NotSerializable) -> None: ...
@@ -111,16 +82,11 @@ def test_compile_fails_on_unresolved_injectable() -> None:
 
 
 def test_trap_keyword_only_optional_data_is_not_an_unresolved_injectable() -> None:
-    """The `since: date | None = None` trap: a keyword-only param WITH a default
-    is optional Data, never an injectable — compile must accept it."""
 
     @operation
     def op(order_id: int, *, since: date | None = None) -> None: ...
 
-    _app_with_db().compile()  # no raise
-
-
-# fail-fast: non-serializable data / output
+    _app_with_db().compile()
 
 
 def test_compile_fails_on_non_serializable_data() -> None:
@@ -143,10 +109,7 @@ def test_compile_accepts_newtype_and_container_data() -> None:
     @operation
     def op(customer_id: CustomerId, order_ids: list[int]) -> dict[str, int]: ...
 
-    _app_with_db().compile()  # no raise
-
-
-# aggregation
+    _app_with_db().compile()
 
 
 def test_compile_aggregates_all_problems() -> None:
@@ -158,24 +121,19 @@ def test_compile_aggregates_all_problems() -> None:
     assert len(exc.value.problems) == 3
 
 
-# idempotency
-
-
 def test_compile_is_idempotent() -> None:
     @operation
     def op(order_id: int, *, db: FakeSession) -> None: ...
 
     app = _app_with_db()
     app.compile()
-    app.compile()  # harmless re-run
+    app.compile()
 
 
 def test_implicit_first_start_rejects_what_explicit_compile_rejects() -> None:
-    """`ensure_compiled` (the implicit-on-first-start backstop) runs the same
-    checks as the explicit `compile()`."""
 
     @operation
-    def op(db: FakeSession) -> None: ...  # positional capability — bad
+    def op(db: FakeSession) -> None: ...
 
     with pytest.raises(CompileError):
         _app_with_db().compile()
@@ -189,4 +147,4 @@ def test_ensure_compiled_is_a_noop_after_explicit_compile() -> None:
 
     app = _app_with_db()
     app.compile()
-    app.ensure_compiled()  # idempotent no-op
+    app.ensure_compiled()

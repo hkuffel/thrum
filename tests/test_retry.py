@@ -1,11 +1,3 @@
-"""Retry + backoff tests.
-
-The backoff curve is pure (no DB, no clock) and tested directly here with a fixed
-rng so jitter is deterministic. The budget decision is proven against real
-Postgres in test_worker.py / the e2e below: assertions are on observable DB state
-(Run status / next_attempt_at, Attempt outcomes / numbers), never internal wiring.
-"""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -42,30 +34,23 @@ async def _claim_one(session_factory, worker_id="worker-1"):
 
 
 async def _fail(session_factory, item, operation):
-    """Record an Operation-attributable failure for `item` under `operation`'s policy."""
     async with session_factory() as session, session.begin():
         await record_result(
             session, item, ExecutionResult(AttemptOutcome.failed, None, "boom"), operation
         )
 
 
-# The pure curve (no DB)
-
-
 def test_backoff_no_jitter_is_capped_exponential():
     policy = RetryPolicy(initial_delay=1.0, backoff_factor=2.0, max_delay=300.0, jitter=False)
-    # 1 → 2 → 4 → 8 ... then capped at 300.
     assert _seconds(backoff_delay(1, policy)) == 1.0
     assert _seconds(backoff_delay(2, policy)) == 2.0
     assert _seconds(backoff_delay(3, policy)) == 4.0
     assert _seconds(backoff_delay(4, policy)) == 8.0
-    # Far enough out that the exponential exceeds the cap.
     assert _seconds(backoff_delay(20, policy)) == 300.0
 
 
 def test_backoff_full_jitter_stays_within_ceiling():
     policy = RetryPolicy(initial_delay=1.0, backoff_factor=2.0, max_delay=300.0, jitter=True)
-    # rng() -> 1.0 yields the ceiling; -> 0.0 yields zero; -> 0.5 the midpoint.
     assert _seconds(backoff_delay(3, policy, rng=lambda: 1.0)) == 4.0
     assert _seconds(backoff_delay(3, policy, rng=lambda: 0.0)) == 0.0
     assert _seconds(backoff_delay(3, policy, rng=lambda: 0.5)) == 2.0
@@ -74,12 +59,11 @@ def test_backoff_full_jitter_stays_within_ceiling():
 def test_backoff_jitter_real_rng_never_exceeds_ceiling():
     policy = RetryPolicy(initial_delay=1.0, backoff_factor=2.0, max_delay=300.0, jitter=True)
     for _ in range(1000):
-        assert 0.0 <= _seconds(backoff_delay(5, policy)) <= 16.0  # ceiling = 1*2^4
+        assert 0.0 <= _seconds(backoff_delay(5, policy)) <= 16.0
 
 
 def test_backoff_failure_index_clamped_at_one():
     policy = RetryPolicy(initial_delay=1.0, backoff_factor=2.0, jitter=False)
-    # 0 / negative degrade to the first-step delay, not a negative exponent.
     assert _seconds(backoff_delay(0, policy)) == 1.0
     assert _seconds(backoff_delay(-3, policy)) == 1.0
 
@@ -90,12 +74,7 @@ def test_retry_policy_defaults_are_the_beachhead():
     assert (p.initial_delay, p.max_delay, p.backoff_factor, p.jitter) == (1.0, 300.0, 2.0, True)
 
 
-# The budget decision in Record (real DB)
-
-
 async def test_failure_with_budget_remaining_requeues_with_backoff(session_factory):
-    """A failing Operation with budget left returns to `pending` with a future
-    next_attempt_at — the Run loops (ADR-0013) rather than failing terminally."""
     operation = make_operation(
         fn=lambda: None, namespace="billing", name="send_receipts", max_attempts=3
     )
@@ -109,17 +88,11 @@ async def test_failure_with_budget_remaining_requeues_with_backoff(session_facto
         now = (await session.execute(select(func.now()))).scalar_one()
         assert run.status == RunStatus.pending
         assert run.next_attempt_at is not None
-        # default 1s initial delay (jitter may pull it toward 0, but it is set);
-        # it is at/after the recorded instant, gating immediate re-claim.
         assert run.next_attempt_at >= run.created_at
         assert run.next_attempt_at <= now + dt.timedelta(seconds=2)
 
 
 async def test_budget_exhaustion_sets_run_failed(session_factory):
-    """The Run goes terminal `failed` only once max_attempts Operation-attributable
-    Attempts are spent — not before."""
-    # Zero backoff so the retry is immediately re-claimable (the backoff envelope
-    # is covered by the pure tests + test_failure_with_budget_remaining_*).
     operation = make_operation(
         fn=lambda: None,
         namespace="billing",
@@ -132,12 +105,12 @@ async def test_budget_exhaustion_sets_run_failed(session_factory):
 
     item1 = await _claim_one(session_factory)
     await _fail(session_factory, item1, operation)
-    async with session_factory() as session:  # still retrying after 1/2
+    async with session_factory() as session:
         assert (await session.get(Run, run_id)).status == RunStatus.pending
 
     item2 = await _claim_one(session_factory)
     await _fail(session_factory, item2, operation)
-    async with session_factory() as session:  # budget spent after 2/2
+    async with session_factory() as session:
         run = await session.get(Run, run_id)
         assert run.status == RunStatus.failed
         count = (
@@ -149,7 +122,6 @@ async def test_budget_exhaustion_sets_run_failed(session_factory):
 
 
 async def test_default_single_attempt_is_terminal_on_first_failure(session_factory):
-    """max_attempts=1 (the default) keeps the old behavior: one raise → failed."""
     operation = make_operation(fn=lambda: None, namespace="billing", name="send_receipts")
     run_id = await _enqueue(session_factory, operation.key)
 
@@ -163,9 +135,6 @@ async def test_default_single_attempt_is_terminal_on_first_failure(session_facto
 
 
 async def test_abandoned_attempt_does_not_spend_budget(session_factory):
-    """ADR-0020: a reaped (`abandoned`) Attempt — a Worker death, not an Operation
-    failure — must not count toward the budget, so a max_attempts=2 Run with one
-    abandoned + one failed Attempt is still retried, not failed."""
     operation = make_operation(
         fn=lambda: None,
         namespace="billing",
@@ -176,8 +145,6 @@ async def test_abandoned_attempt_does_not_spend_budget(session_factory):
     )
     run_id = await _enqueue(session_factory, operation.key)
 
-    # First claim is "killed": close its Attempt `abandoned` and requeue, exactly
-    # as the Reaper would (no budget consumed).
     item1 = await _claim_one(session_factory)
     async with session_factory() as session, session.begin():
         attempt = await session.get(Attempt, item1.attempt_id)
@@ -186,20 +153,15 @@ async def test_abandoned_attempt_does_not_spend_budget(session_factory):
         run = await session.get(Run, run_id)
         run.status = RunStatus.pending
 
-    # Now a genuine Operation failure (the first one that counts) under max_attempts=2.
     item2 = await _claim_one(session_factory)
     await _fail(session_factory, item2, operation)
 
     async with session_factory() as session:
         run = await session.get(Run, run_id)
-        # If `abandoned` had counted, budget would be spent (2) → failed. It does
-        # not, so only the single `failed` counts (1/2) → still retrying.
         assert run.status == RunStatus.pending
 
 
 async def test_unresolved_operation_is_terminal_not_retried(session_factory):
-    """An unresolved Operation (None policy) is non-retryable: terminal `failed`,
-    surfacing the misconfiguration instead of hot-looping (ADR-0021)."""
     run_id = await _enqueue(session_factory, "ghost.operation")
     item = await _claim_one(session_factory)
 
@@ -214,13 +176,7 @@ async def test_unresolved_operation_is_terminal_not_retried(session_factory):
         assert run.next_attempt_at is None
 
 
-# End-to-end through run_once (real DB)
-
-
 def _flaky_operation(fails: int) -> Operation:
-    """An Operation that raises its first `fails` invocations, then returns. Backoff is
-    zeroed (initial_delay=0, jitter off) so each retry is immediately claimable,
-    keeping the e2e fast and deterministic."""
     state = {"n": 0}
 
     def fn():
@@ -244,7 +200,7 @@ async def test_e2e_operation_succeeds_after_two_retries(session_factory):
     run_id = await _enqueue(session_factory, operation.key)
     operations = {operation.key: operation}
 
-    for _ in range(3):  # fail, fail, succeed
+    for _ in range(3):
         await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
 
     async with session_factory() as session:
@@ -286,7 +242,6 @@ async def test_e2e_always_failing_operation_exhausts_budget(session_factory):
 
     await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
     await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
-    # Budget spent — nothing left to claim.
     processed = await run_once(session_factory, "worker-1", 10, LEASE, operations=operations)
 
     assert processed == 0

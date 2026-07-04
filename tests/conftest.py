@@ -1,6 +1,3 @@
-"""Test fixtures. Thrum is Postgres-native, so tests run against a real
-ephemeral Postgres via testcontainers — mocking the DB would test nothing."""
-
 from __future__ import annotations
 
 import pytest
@@ -9,9 +6,6 @@ import pytest_asyncio
 
 @pytest.fixture(autouse=True)
 def _clean_global_registry():
-    """The Registry's process-global view bleeds between tests (bare
-    `@operation` registers under `default`) — isolate it so each test gets a
-    clean slate."""
     from thrum import Registry
 
     saved_ops = Registry._global.copy()
@@ -29,27 +23,20 @@ def _clean_global_registry():
 
 @pytest.fixture(scope="session")
 def postgres_dsn() -> str:
-    """A throwaway Postgres for the test session.
-
-    Skips if Docker is unavailable so the suite degrades gracefully in
-    environments without it.
-    """
     try:
         from testcontainers.postgres import PostgresContainer
-    except ModuleNotFoundError:  # pragma: no cover
+    except ModuleNotFoundError:
         pytest.skip("testcontainers not installed")
 
     try:
         with PostgresContainer("postgres:16") as pg:
             yield pg.get_connection_url()
-    except Exception as exc:  # pragma: no cover - no docker available
+    except Exception as exc:
         pytest.skip(f"Postgres container unavailable: {exc}")
 
 
 @pytest.fixture(scope="session")
 def migrated_dsn(postgres_dsn: str) -> str:
-    """The session Postgres with Thrum's schema applied once via the real
-    migration path — also the e2e coverage for `thrum db upgrade`."""
     from thrum.jobs.db.migrations import upgrade
 
     upgrade(postgres_dsn)
@@ -58,8 +45,6 @@ def migrated_dsn(postgres_dsn: str) -> str:
 
 @pytest_asyncio.fixture
 async def session_factory(migrated_dsn: str):
-    """A clean async session factory per test: truncates Thrum's tables, then
-    yields an `async_sessionmaker` bound to a fresh async engine."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker
 

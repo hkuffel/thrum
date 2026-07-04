@@ -1,8 +1,3 @@
-"""Unit tests for op.schedule(cron, tz=...) declaration.
-
-No Postgres required — these test SDK-core validation that fires at
-import/declaration time."""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -91,8 +86,6 @@ def test_duplicate_cron_across_timezones_raises() -> None:
 
     dup_tz_op.schedule("0 2 * * *", tz="UTC")
 
-    # uq_schedules_task_cron keys on cron alone, so a differing tz does not
-    # escape the collision.
     with pytest.raises(ValueError, match="Duplicate schedule cron"):
         dup_tz_op.schedule("0 2 * * *", tz="America/New_York")
 
@@ -159,7 +152,7 @@ def test_schedule_is_frozen() -> None:
     s = my_task.schedule("0 2 * * *", tz="America/Vancouver")
 
     with pytest.raises(AttributeError):
-        s.cron = "0 3 * * *"  # type: ignore[misc]
+        s.cron = "0 3 * * *"
 
 
 def test_schedule_with_minimal_policy() -> None:
@@ -211,8 +204,6 @@ def test_operation_remains_hashable_with_schedules() -> None:
     hashable_op.schedule("0 2 * * *", tz="UTC")
     hashable_op.schedule("0 9 * * 1", tz="America/New_York")
 
-    # frozen dataclass carrying a mutable list must stay hashable (the list is
-    # excluded from eq/hash) so Operations can be used as dict keys / set members.
     assert hash(hashable_op) is not None
     assert hashable_op in {hashable_op}
 

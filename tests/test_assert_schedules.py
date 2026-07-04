@@ -69,8 +69,6 @@ async def test_idempotent_rerun_refreshes_last_declared_at(session_factory):
 
 @pytest.mark.asyncio
 async def test_changed_tz_updates_in_place(session_factory):
-    # Same cron, changed timezone/policy: schedule identity is (operation, cron),
-    # so this updates the existing row in place.
     declared_v1 = {"ns.evolve": [_spec(cron="0 2 * * *", timezone="America/Vancouver")]}
     declared_v2 = {"ns.evolve": [_spec(cron="0 2 * * *", timezone="Europe/London")]}
 
@@ -91,9 +89,6 @@ async def test_changed_tz_updates_in_place(session_factory):
 
 @pytest.mark.asyncio
 async def test_changed_cron_inserts_new_row(session_factory):
-    # A changed cron is a *different* recurrence (identity is operation+cron): the
-    # new cron inserts a fresh row and the old row survives to be reaped by
-    # pause_stale_schedules once it stops being declared.
     declared_v1 = {"ns.recur": [_spec(cron="0 2 * * *")]}
     declared_v2 = {"ns.recur": [_spec(cron="30 3 * * *")]}
 
@@ -125,7 +120,6 @@ async def test_revival_reasserts_declaration_gate(session_factory):
     async with session_factory() as s, s.begin():
         await assert_declared_schedules(s, declared)
 
-    # simulate gate-off (e.g. removed from code, then re-added)
     async with session_factory() as s, s.begin():
         row = await _get_schedule(s, "ns", "revive")
         row.declaration_active = False
@@ -145,7 +139,6 @@ async def test_operational_pause_preserved_after_assert(session_factory):
     async with session_factory() as s, s.begin():
         await assert_declared_schedules(s, declared)
 
-    # simulate v2 operational pause
     async with session_factory() as s, s.begin():
         row = await _get_schedule(s, "ns", "paused")
         row.operationally_paused_at = dt.datetime.now(dt.UTC)
@@ -189,8 +182,6 @@ async def test_concurrent_asserts_converge(session_factory):
 
 @pytest.mark.asyncio
 async def test_multiple_schedules_per_operation_all_persist(session_factory):
-    # Two recurrences for one operation must produce two rows, not collapse
-    # onto the last-declared one (uq_schedules_operation_cron keys on cron).
     declared = {
         "ns.multi": [
             _spec(cron="0 2 * * *", timezone="UTC"),
@@ -223,8 +214,6 @@ async def test_multiple_schedules_per_operation_all_persist(session_factory):
 
 @pytest.mark.asyncio
 async def test_resibling_schedule_updates_only_its_row(session_factory):
-    # Re-declaring one recurrence (same cron) updates that row in place while
-    # leaving its sibling untouched.
     async with session_factory() as s, s.begin():
         await assert_declared_schedules(
             s,

@@ -1,13 +1,3 @@
-"""Execution Scope tests (ADR-0024): the single-transaction injected-session
-model against real Postgres.
-
-The Scope owns the execution transaction. A `scope_probe` table stands in for an Operation's own DB
-effects so a test can assert what committed: on success the probe write and the
-`succeeded` Attempt land together; on a raised body neither lands and the Attempt
-is recorded `failed` in a separate transaction. Assertions are on observable DB
-state, never internal wiring.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -33,12 +23,10 @@ LEASE = dt.timedelta(seconds=45)
 
 
 class Telemetry:
-    """A fake non-db Capability type, injected by `_recording_provider`."""
+    pass
 
 
 def _recording_provider(events: list[str]):
-    """A Provider that records its enter/exit on `events` — proof the Scope tears
-    every Provider down on the `AsyncExitStack`, success or raise."""
 
     @asynccontextmanager
     async def provider(ctx, caller):
@@ -80,14 +68,10 @@ async def _write_probe(db: AsyncSession, note: str) -> None:
     await db.execute(text("INSERT INTO scope_probe (note) VALUES (:n)"), {"n": note})
 
 
-# Success: the injected write and the completion record commit as one fact
-
-
 async def test_injected_session_write_commits_with_attempt(session_factory):
     await _reset_probe(session_factory)
 
     async def writer(*, db: AsyncSession) -> dict:
-        # The body never opens or imports a session — it uses the one injected.
         await _write_probe(db, "succeeded")
         return {"wrote": 1}
 
@@ -107,9 +91,6 @@ async def test_injected_session_write_commits_with_attempt(session_factory):
     assert attempt.ended_at is not None
 
 
-# Failure: the execution transaction rolls back; the Attempt is recorded in a separate transaction
-
-
 async def test_raised_body_rolls_back_and_records_failed(session_factory):
     await _reset_probe(session_factory)
 
@@ -123,12 +104,11 @@ async def test_raised_body_rolls_back_and_records_failed(session_factory):
 
     await run_scoped(session_factory, item, {operation.key: operation}, {AsyncSession: db_provider})
 
-    # Zero committed effects — the probe write rolled back with the execution transaction.
     assert await _probe_count(session_factory) == 0
     async with session_factory() as session:
         run = await session.get(Run, run_id)
         attempt = await session.get(Attempt, item.attempt_id)
-    assert run.status == RunStatus.failed  # never stuck `running`
+    assert run.status == RunStatus.failed
     assert attempt.outcome == AttemptOutcome.failed
     assert "ValueError: nope" in attempt.error
 
@@ -149,9 +129,6 @@ async def test_non_serializable_output_fails_without_traceback(session_factory):
     assert run.status == RunStatus.failed
     assert "not JSON-serializable" in attempt.error
     assert "Traceback" not in attempt.error
-
-
-# Providers are entered and exited on the stack on both paths
 
 
 async def test_providers_torn_down_on_success_path(session_factory):
@@ -189,12 +166,10 @@ async def test_providers_torn_down_on_failure_path(session_factory):
 
 
 async def test_provider_setup_raise_is_recorded_not_propagated(session_factory):
-    # A Provider __aenter__ failure is an unfilled Capability, not a worker
-    # death: record it `failed` so the batch loop keeps turning, never propagate.
     @asynccontextmanager
     async def exploding_setup(ctx, caller):
         raise RuntimeError("setup boom")
-        yield  # unreachable; satisfies the asynccontextmanager generator shape
+        yield
 
     async def op(*, t: Telemetry) -> dict:
         return {"ok": True}
@@ -215,9 +190,6 @@ async def test_provider_setup_raise_is_recorded_not_propagated(session_factory):
 
 
 async def test_failure_path_teardown_raise_still_records_failed(session_factory):
-    # A raised body sets the failure before the stack unwinds; a teardown that
-    # also raises must not bury that outcome — the Attempt is still recorded
-    # `failed` and nothing propagates, so the batch loop keeps turning.
     @asynccontextmanager
     async def exploding_teardown(ctx, caller):
         yield Telemetry()
@@ -242,8 +214,6 @@ async def test_failure_path_teardown_raise_still_records_failed(session_factory)
 
 
 async def test_provider_teardown_raise_after_commit_preserves_success(session_factory):
-    # A Provider teardown that raises after the execution transaction commits must propagate, not be
-    # caught and re-recorded as a failure over the already-`succeeded` Run.
     @asynccontextmanager
     async def exploding(ctx, caller):
         yield Telemetry()
@@ -267,9 +237,6 @@ async def test_provider_teardown_raise_after_commit_preserves_success(session_fa
     assert attempt.outcome == AttemptOutcome.succeeded
 
 
-# Crash before commit: a worker death mid-execution lands nothing; the Reaper recovers
-
-
 async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
     await _reset_probe(session_factory)
     state = {"crash": True}
@@ -277,7 +244,7 @@ async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
     async def flaky(*, db: AsyncSession) -> dict:
         await _write_probe(db, "attempt")
         if state["crash"]:
-            raise asyncio.CancelledError  # worker death, not an Operation failure
+            raise asyncio.CancelledError
         return {"ok": True}
 
     operation = make_operation(fn=flaky, namespace="probe", name="flaky")
@@ -289,7 +256,6 @@ async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
             session_factory, first, {operation.key: operation}, {AsyncSession: db_provider}
         )
 
-    # Nothing committed; the Run is still `running` with an open Attempt.
     assert await _probe_count(session_factory) == 0
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -297,7 +263,6 @@ async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
     assert run.status == RunStatus.running
     assert attempt.ended_at is None
 
-    # Lease lapses, the Reaper requeues, and re-execution succeeds (at-least-once).
     async with session_factory() as session, session.begin():
         await session.execute(
             update(Attempt)
@@ -318,16 +283,13 @@ async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):
     assert run.status == RunStatus.succeeded
 
 
-# Worker boot: compile fails fast, then schedules still reconcile
-
-
 async def test_boot_fails_fast_on_unresolvable_capability(session_factory, migrated_dsn):
     reg = Registry("boot")
 
     @reg.operation
     async def needs_db(*, db: AsyncSession) -> dict: ...
 
-    worker = Worker(WorkerConfig(dsn=migrated_dsn), App(registry=reg))  # no db provider
+    worker = Worker(WorkerConfig(dsn=migrated_dsn), App(registry=reg))
     with pytest.raises(CompileError, match="matches no registered capability"):
         await worker._boot(session_factory)
 
@@ -352,8 +314,6 @@ async def test_boot_reconciles_declared_schedules(session_factory, migrated_dsn)
 
 
 async def test_boot_reconciles_only_the_apps_own_schedules(session_factory, migrated_dsn):
-    # A foreign registry's schedule is declared in the same process; a scoped
-    # App must not reconcile it (or it would claim Runs it cannot execute).
     mine = Registry("mine")
     foreign = Registry("foreign")
 
@@ -373,9 +333,6 @@ async def test_boot_reconciles_only_the_apps_own_schedules(session_factory, migr
     async with session_factory() as session:
         rows = (await session.execute(select(Schedule))).scalars().all()
     assert [r.operation_namespace for r in rows] == ["mine"]
-
-
-# The Scope resolves operations + capabilities from the App, not Registry._global
 
 
 async def test_run_once_with_app_injects_db_end_to_end(session_factory):
@@ -401,8 +358,6 @@ async def test_run_once_with_app_injects_db_end_to_end(session_factory):
 
 
 async def test_run_once_without_app_does_not_reach_global_registry(session_factory):
-    # An Operation exists in the process-global registry, but run_once with no
-    # App resolves nothing — the Registry._global default reach was retired.
     @operation
     async def ghost() -> dict:
         return {}
@@ -410,7 +365,7 @@ async def test_run_once_without_app_does_not_reach_global_registry(session_facto
     run_id = await _enqueue(session_factory, "default.ghost")
     processed = await run_once(session_factory, "worker-1", 10, LEASE)
 
-    assert processed == 1  # claimed, but unresolved → failed, not executed
+    assert processed == 1
     async with session_factory() as session:
         run = await session.get(Run, run_id)
         attempt = (
@@ -420,12 +375,7 @@ async def test_run_once_without_app_does_not_reach_global_registry(session_facto
     assert "not registered" in attempt.error
 
 
-# Caller freeze/thaw: the identity stamped at Enqueue is restored into the Scope
-
-
 def _capturing_db_provider(seen: list[Caller]):
-    """The real `db` Provider, wrapped to record the Caller the Scope passes it —
-    proof the thawed Caller reaches Capability construction full-authority."""
 
     @asynccontextmanager
     async def provider(ctx, caller):
@@ -466,16 +416,11 @@ async def test_scope_thaws_the_caller_stamped_at_enqueue(session_factory):
         {AsyncSession: _capturing_db_provider(seen)},
     )
 
-    # The db Provider received exactly the Caller frozen at Enqueue, and full
-    # authority — no attenuation: the probe write committed unblocked.
     assert seen == [Caller.system()]
     assert await _probe_count(session_factory) == 1
 
 
 async def test_malformed_frozen_caller_records_failed_not_stuck(session_factory):
-    # A frozen Caller missing "subject" (schema drift, manual intervention) must
-    # be recorded as a failed Attempt, never propagate — or the Run hangs
-    # `running` and the Reaper re-claims the same bad row forever.
     async def op(*, db: AsyncSession) -> dict:
         return {"ok": True}
 

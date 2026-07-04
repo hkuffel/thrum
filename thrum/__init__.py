@@ -1,5 +1,3 @@
-"""thrum — author an `@operation` once, project it onto any surface."""
-
 from __future__ import annotations
 
 from thrum.jobs.app import App as App

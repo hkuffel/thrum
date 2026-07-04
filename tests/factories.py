@@ -1,7 +1,3 @@
-"""Test factories for the framework's value objects. The Worker/execution tests
-drive the execute/record path directly, so they build an Operation without
-booting the full registry."""
-
 from __future__ import annotations
 
 import inspect
@@ -20,11 +16,6 @@ def make_operation(
     max_attempts: int = 1,
     **config: Any,
 ) -> Operation:
-    """Build an Operation around `fn`, mapping the Attempt-budget term
-    `max_attempts` onto the Operation's `retries` (= max_attempts - 1).
-    Remaining execution config (`timeout`, `retry_initial_delay`, …) passes
-    through. v1 callers register no capabilities, so capability params classify
-    as data here just as they do in the real registry."""
     return Operation(
         fn=fn,
         namespace=namespace,

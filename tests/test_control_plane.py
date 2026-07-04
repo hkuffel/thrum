@@ -1,14 +1,3 @@
-"""The read-only Control Plane against real Postgres (ADR-0027, ADR-0028).
-
-Covers the synchronous keystone: the Execution Scope core run in isolation (no
-Worker, no transport), the write-blocking read-only `db` Provider, and the
-seeded-DB `thrum runs list` end to end — proving the built-in lights up inline
-against the developer's Postgres and creates no Run, Attempt, or Effect.
-
-Skips gracefully without Docker via the `session_factory` / `migrated_dsn`
-fixtures.
-"""
-
 from __future__ import annotations
 
 import json
@@ -35,9 +24,6 @@ async def _counts(session_factory) -> tuple[int, int, int]:
     return runs, attempts, effects
 
 
-# The Execution Scope core, in isolation
-
-
 async def test_scope_invoke_returns_output_and_creates_no_run(session_factory):
     async def reader(*, db: AsyncSession) -> dict:
         value = (await db.execute(text("SELECT 42"))).scalar_one()
@@ -52,9 +38,6 @@ async def test_scope_invoke_returns_output_and_creates_no_run(session_factory):
     assert await _counts(session_factory) == (0, 0, 0)
 
 
-# The read-only `db` Provider: a read works, a write raises
-
-
 async def test_read_only_provider_allows_reads_blocks_writes(session_factory):
     async with session_factory() as session, session.begin():
         ctx = ProviderContext(session=session, attenuations=(ReadOnly,))
@@ -65,7 +48,6 @@ async def test_read_only_provider_allows_reads_blocks_writes(session_factory):
 
 
 async def test_write_capable_provider_is_the_unmarked_default(session_factory):
-    # The same Provider, unmarked, imposes no block — proof read-only is opt-in.
     async with session_factory() as session, session.begin():
         ctx = ProviderContext(session=session, attenuations=())
         async with db_provider(ctx, Caller.system()) as db:
@@ -74,9 +56,6 @@ async def test_write_capable_provider_is_the_unmarked_default(session_factory):
             assert (
                 await db.execute(text("SELECT count(*) FROM probe_writeable"))
             ).scalar_one() == 1
-
-
-# End to end: seeded DB, `thrum runs list` lights up unfiltered
 
 
 async def test_runs_list_projects_seeded_runs_and_records_nothing(session_factory, migrated_dsn):
@@ -95,13 +74,10 @@ async def test_runs_list_projects_seeded_runs_and_records_nothing(session_factor
     listed = json.loads(rendered)
     assert {row["id"] for row in listed} == seeded
     assert all(row["operation"].startswith("billing.") for row in listed)
-    # Reached synchronously: no Run, Attempt, or Effect beyond the two seeded Runs.
     assert await _counts(session_factory) == (2, 0, 0)
 
 
 def test_runs_list_cli_command_runs_with_no_server(migrated_dsn):
-    # The actual `thrum runs list` wiring, driven through Click against a bare
-    # Postgres — no Worker, no server, exercising the asyncio.run entry point.
     result = CliRunner().invoke(main, ["runs", "list", "--dsn", migrated_dsn, "--json"])
 
     assert result.exit_code == 0, result.output

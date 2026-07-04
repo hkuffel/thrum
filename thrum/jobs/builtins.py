@@ -15,11 +15,6 @@ control_plane = Registry("thrum")
 
 @dataclass(frozen=True)
 class RunView:
-    """The public read projection of a Run — a serialization-contract-conformant
-    read type decoupled from the ORM `Run` (ADR-0028). It exposes only the fields
-    the Control Plane surfaces, as JSON-native values, so it crosses any
-    projection's encoder unchanged."""
-
     id: str
     operation: str
     status: str
@@ -39,14 +34,11 @@ class RunView:
 
 @control_plane.operation(name="list_runs")
 async def list_runs(*, db: ReadOnly[AsyncSession]) -> list[RunView]:
-    """List Runs newest-first."""
     runs = (await db.execute(select(Run).order_by(Run.created_at.desc()))).scalars().all()
     return [RunView.from_run(run) for run in runs]
 
 
 def build_control_plane() -> App:
-    """The synchronous Control Plane App: the built-in `thrum` Operations plus the
-    read-only `db` Provider"""
     app = App(registry=control_plane)
     app.provide(AsyncSession, db_provider)
     app.compile()

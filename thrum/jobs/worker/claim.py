@@ -15,14 +15,11 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ClaimedRun:
-    """The handoff payload from Claim to Execute/Record — plain data, not a live
-    ORM object, so it survives the claim transaction closing."""
-
     run_id: uuid.UUID
     attempt_id: uuid.UUID
-    operation_key: str  # namespace.name
+    operation_key: str
     inputs: dict
-    caller: dict | None  # the Caller frozen at Enqueue, thawed by the Scope
+    caller: dict | None
 
 
 async def claim_runs(
@@ -31,11 +28,9 @@ async def claim_runs(
     limit: int,
     lease_ttl: dt.timedelta,
 ) -> list[ClaimedRun]:
-    """Claim up to `limit` due Runs. Must run inside an open transaction."""
     if limit <= 0:
         return []
 
-    # Derive the lease window from the DB clock, not the Worker's wall clock
     db_now = (await session.execute(select(func.now()))).scalar_one()
     lease_expires_at = db_now + lease_ttl
 
@@ -65,7 +60,6 @@ async def claim_runs(
                 )
             )
         ).scalar_one()
-        # Attempt numbers are per-Run and monotonic
         attempt = Attempt(
             run_id=run.id,
             attempt_number=prior + 1,
@@ -75,7 +69,7 @@ async def claim_runs(
         )
         session.add(attempt)
         run.status = RunStatus.running
-        await session.flush()  # populate attempt.id
+        await session.flush()
         claimed.append(
             ClaimedRun(
                 run_id=run.id,

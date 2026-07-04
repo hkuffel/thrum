@@ -1,16 +1,3 @@
-"""The Effect: what an Attempt committed to the database, observed by
-instrumenting the Scope's session and written into the execution transaction (ADR-0024).
-
-One row per (table, kind) per Attempt with a `row_count` — table-level, never
-per-row: a 10k-row batch update is one Effect with `row_count = 10000`, not 10k
-rows. Effects key off the Attempt: a failed Attempt's writes roll back with the
-execution transaction and contribute zero Effects, so a retry's Effects attribute to the retry.
-
-The derived Zero-Effect flag (`succeeded` with zero Effects) is computed from the
-Effect count, never stored as a `status` — observability must not mutate lifecycle
-state.
-"""
-
 from __future__ import annotations
 
 import datetime as dt

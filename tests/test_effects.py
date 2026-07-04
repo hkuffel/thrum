@@ -1,11 +1,3 @@
-"""Effect recording + Zero-Effect tests (ADR-0024): observe what an Operation
-committed and surface "succeeded but committed zero Effects."
-
-Operations write into two probe tables so a test can assert the aggregated Effect
-rows the Scope recorded into the execution transaction — table-level, per-Attempt, with a row_count.
-Assertions are on observable DB state.
-"""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -152,8 +144,6 @@ async def test_success_commits_effects_records_and_attempt_atomically(session_fa
 async def test_recorder_listener_raise_does_not_roll_back_effects(session_factory, monkeypatch):
     await _reset_probes(session_factory)
 
-    # A recorder observation that raises must be swallowed: the operation's real
-    # effects still commit even though no Effect rows are recorded.
     def boom(_clauseelement):
         raise RuntimeError("recorder boom")
 
@@ -171,7 +161,7 @@ async def test_recorder_listener_raise_does_not_roll_back_effects(session_factor
     async with session_factory() as session:
         probe = (await session.execute(text("SELECT count(*) FROM effect_probe"))).scalar_one()
         run = await session.get(Run, run_id)
-    assert probe == 1  # the real effect committed despite the recorder throwing
+    assert probe == 1
     assert run.status == RunStatus.succeeded
     assert await _effects(session_factory, item.attempt_id) == []
 
@@ -192,7 +182,6 @@ async def test_failed_then_retried_attributes_effects_to_the_retry(session_facto
     first = await _claim_one(session_factory)
     await run_scoped(session_factory, first, {operation.key: operation}, DB)
 
-    # The retry is gated behind next_attempt_at; clear it so it claims now.
     async with session_factory() as session, session.begin():
         await session.execute(
             update(Run).where(Run.id == run_id).values(next_attempt_at=func.now())

@@ -1,12 +1,3 @@
-"""Unit tests for the generic CLI projection and the RunView read type (ADR-0028).
-
-The projection is `argv -> input schema -> scope.invoke -> encode`; this file
-covers the transport-mechanical halves that need no Postgres — argv decoding
-against an Operation's input schema, and table/JSON encoding — plus RunView's
-reduction to a JSON-able dict. The scope.invoke middle is exercised end-to-end in
-test_control_plane.py.
-"""
-
 from __future__ import annotations
 
 import json
@@ -20,9 +11,6 @@ from thrum.jobs.projection.cli import _to_jsonable, decode_argv, encode_json, en
 
 def _fake_op(fn):
     return make_operation(fn=fn, namespace="fake", name="op")
-
-
-# argv decode against the input schema
 
 
 def test_decode_binds_positional_required_and_typed_options() -> None:
@@ -72,9 +60,6 @@ def test_decode_coerces_optional_scalar_option() -> None:
     assert decode_argv(_fake_op(fn), ["--limit", "5"]) == {"limit": 5}
 
 
-# encoding
-
-
 def test_encode_table_renders_records_as_columns() -> None:
     output = [{"id": "1", "status": "succeeded"}, {"id": "2", "status": "failed"}]
 
@@ -109,9 +94,6 @@ def test_encode_reduces_run_view_dataclasses() -> None:
 
     assert json.loads(encode_json(views)) == [_to_jsonable(views[0])]
     assert "thrum.list_runs" in encode_table(views)
-
-
-# RunView is a serialization-contract-conformant read type
 
 
 def test_run_view_reduces_to_a_jsonable_dict() -> None:

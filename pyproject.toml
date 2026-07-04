@@ -22,23 +22,17 @@ classifiers = [
   "Typing :: Typed",
 ]
 
-# Base install = the durable-job slice (thrum.jobs): SDK + Worker + scheduler +
-# CLI. The import-discipline law: nothing reachable from `thrum.jobs.models`,
-# `thrum.jobs.registry`, `thrum.jobs.enqueue`, or `thrum.jobs.db` may import the
-# server stack (FastAPI) at module load.
 dependencies = [
   "sqlalchemy>=2.0",
-  "greenlet>=3",          # required by SQLAlchemy's async engine (ADR-0005)
+  "greenlet>=3",
   "alembic>=1.13",
-  "croniter>=2.0",        # cron expansion on the Python side (Postgres does the tz conversion)
-  "click>=8.1",           # CLI
-  "psycopg[binary]>=3.1", # sync driver: migrations + CLI
-  "asyncpg>=0.29",        # async driver: the async-first Worker (ADR-0005)
+  "croniter>=2.0",
+  "click>=8.1",
+  "psycopg[binary]>=3.1",
+  "asyncpg>=0.29",
 ]
 
 [project.optional-dependencies]
-# The one heavy, don't-want-it-in-my-app dependency: the FastAPI control plane
-# + dashboard. Only the box running the dashboard needs it.
 server = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",
@@ -53,7 +47,7 @@ dev = [
   "pre-commit>=3.7",
   "pytest>=8",
   "pytest-asyncio>=0.23",
-  "testcontainers[postgres]>=4", # real ephemeral Postgres in tests — mocking the DB tests nothing
+  "testcontainers[postgres]>=4",
 ]
 
 [project.urls]

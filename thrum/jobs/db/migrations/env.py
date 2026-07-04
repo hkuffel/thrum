@@ -1,11 +1,3 @@
-"""Alembic environment for Thrum's self-contained migrations (ADR-0004).
-
-Isolation: the version table lives in the `thrum` schema (never a user's
-`public.alembic_version`), `include_schemas` is on, and an `include_object`
-filter ignores anything outside `thrum` so autogenerate can never reach into
-the user's own tables.
-"""
-
 from __future__ import annotations
 
 from alembic import context
@@ -18,8 +10,7 @@ config = context.config
 target_metadata = Base.metadata
 
 
-def _include_object(obj, name, type_, reflected, compare_to):  # noqa: ANN001, ANN202
-    # Never touch anything outside the thrum schema.
+def _include_object(obj, name, type_, reflected, compare_to):
     if type_ in {"table", "column"}:
         table = getattr(obj, "table", None)
         schema = getattr(obj, "schema", None) or getattr(table, "schema", None)
@@ -27,7 +18,7 @@ def _include_object(obj, name, type_, reflected, compare_to):  # noqa: ANN001, A
     return True
 
 
-def _configure(connection=None) -> None:  # noqa: ANN001
+def _configure(connection=None) -> None:
     context.configure(
         connection=connection,
         url=None if connection else config.get_main_option("sqlalchemy.url"),
@@ -52,7 +43,6 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        # The schema must exist before the version table can be created in it.
         connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{VERSION_TABLE_SCHEMA}"'))
         connection.commit()
         _configure(connection)

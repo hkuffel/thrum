@@ -1,15 +1,3 @@
-"""End-to-end test: the declared front door now feeds the wedge.
-
-Declare an Operation with a due `schedule` → Worker startup assert writes the Schedule
-row → the leader sweep materializes a `scheduled` Run → Claim flips it to
-`running` → Record terminates it `succeeded`. No hand-inserted SQL — every row
-along the path is written by the system, proving the declared front door drives
-the materialization machinery end to end.
-
-Skips gracefully without Docker via the `session_factory`/`migrated_dsn`
-fixtures.
-"""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -28,7 +16,6 @@ LEASE = dt.timedelta(seconds=45)
 
 @pytest.fixture(autouse=True)
 def _clean_global_registry():
-    """The Registry's process-global view bleeds between tests; isolate it."""
     saved_operations = Registry._global.copy()
     saved_schedules = Registry._global_schedules.copy()
     Registry._global.clear()
@@ -51,9 +38,6 @@ async def test_e2e_declared_schedule_through_the_front_door(session_factory, mig
 
     send_receipts.schedule("* * * * *", tz="UTC")
 
-    # Startup assert
-    # The Worker's startup reconcile is what writes the `schedules` row. Drive
-    # it directly (no `Worker.run` loop) so the test stays deterministic.
     worker = Worker(WorkerConfig(dsn=migrated_dsn))
     await worker._assert_schedules(session_factory)
 
@@ -65,13 +49,10 @@ async def test_e2e_declared_schedule_through_the_front_door(session_factory, mig
     assert row.declaration_active is True
     assert row.operationally_paused_at is None
 
-    # Leader sweep materializes
     result = await Scheduler(SchedulerConfig(), session_factory).sweep()
     assert result.materialized > 0
     assert result.missed == 0
 
-    # Make the earliest materialized occurrence due now so Claim can flip it
-    # this pass (the test doesn't sleep for an actual minute).
     async with session_factory() as session, session.begin():
         earliest = (
             (await session.execute(select(Run).order_by(Run.fire_time).limit(1))).scalars().one()
@@ -79,7 +60,6 @@ async def test_e2e_declared_schedule_through_the_front_door(session_factory, mig
         earliest.fire_time = func.now() - dt.timedelta(seconds=1)
         target_id = earliest.id
 
-    # Claim → execute → record
     processed = await run_once(
         session_factory, "worker-e2e", 10, LEASE, operations=Registry._global
     )

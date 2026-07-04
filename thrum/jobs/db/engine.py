@@ -1,6 +1,3 @@
-"""Engine helpers. The async engine is the Worker's primary path; the
-sync engine backs migrations and the CLI."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -23,12 +20,8 @@ def make_sync_engine(dsn: str) -> Engine:
 
 
 def _swap_driver(dsn: str, driver: str) -> str:
-    """Force a specific DBAPI driver onto a Postgres DSN, regardless of which
-    driver (if any) the source URL named — e.g. testcontainers hands back a
-    `postgresql+psycopg2://` URL we must not feed to our psycopg-v3 / asyncpg
-    engines."""
     scheme, sep, rest = dsn.partition("://")
-    base = scheme.split("+", 1)[0]  # drop any existing +driver
+    base = scheme.split("+", 1)[0]
     return f"{base}+{driver}{sep}{rest}"
 
 

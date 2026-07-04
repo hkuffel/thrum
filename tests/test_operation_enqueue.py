@@ -1,12 +1,3 @@
-"""End-to-end integration test for the keystone tracer bullet:
-author a bare `@operation` → call `op.enqueue(session, **inputs)` → assert a
-`pending` Run row exists with the renamed `operation_namespace` / `operation_name`
-columns, on the caller's session, without committing.
-
-Runs against an ephemeral Postgres via the shared `session_factory` fixture and
-skips when Docker is unavailable.
-"""
-
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -22,7 +13,6 @@ async def test_op_enqueue_writes_pending_run_with_renamed_columns(session_factor
 
     async with session_factory() as session:
         run = send_receipts.enqueue(session, invoice_id=42)
-        # Caller controls the commit — `op.enqueue` must not commit on its own.
         await session.commit()
         run_id = run.id
 
@@ -36,8 +26,6 @@ async def test_op_enqueue_writes_pending_run_with_renamed_columns(session_factor
 
 
 async def test_op_enqueue_does_not_commit(session_factory):
-    """Rollback after `op.enqueue` must wipe the Run — confirming the caller
-    owns the transaction boundary."""
 
     @operation
     def send_receipts(invoice_id):

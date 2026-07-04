@@ -1,19 +1,3 @@
-"""Unit tests for the signature model (ADR-0023).
-
-A pure I/O-free deep module: given a function signature and the injected set of
-registered capability types, classify each parameter as required-data /
-optional-data / capability, derive the operation's input schema, and capture the
-output type.
-
-The load-bearing rule under test: a parameter is a Capability iff it is
-keyword-only AND its annotated type is a registered capability type — both
-necessary. The trap case (`*, since: date | None = None` of a non-capability
-type) is optional Data, never a Capability.
-
-Tests drive the classifier directly with a fake capability-type registry; no
-Postgres, no decorator, no worker.
-"""
-
 from __future__ import annotations
 
 import inspect
@@ -30,14 +14,11 @@ from thrum.jobs.signature import (
 
 
 class FakeSession:
-    """Stand-in for `sqlalchemy.orm.Session` — a registered capability type."""
+    pass
 
 
 class FakeMailer:
-    """A second registered capability type, for multi-cap signatures."""
-
-
-# core classification
+    pass
 
 
 def test_positional_param_is_required_data() -> None:
@@ -79,10 +60,8 @@ def test_keyword_only_capability_typed_param_is_capability() -> None:
 
 
 def test_keyword_only_capability_with_default_is_still_capability() -> None:
-    """Registered-type membership alone makes a keyword-only param a
-    Capability — a default does not flip it back to Data."""
 
-    def fn(*, db: FakeSession = None) -> None: ...  # type: ignore[assignment]
+    def fn(*, db: FakeSession = None) -> None: ...
 
     model = classify(fn, capability_types=[FakeSession])
 
@@ -100,13 +79,7 @@ def test_multiple_capabilities_each_classified() -> None:
     ]
 
 
-# attenuation markers (ADR-0027)
-
-
 def test_read_only_marked_capability_unwraps_to_registered_type() -> None:
-    """`db: ReadOnly[Session]` is `Annotated[Session, ReadOnly]`: the classifier
-    unwraps it to the registered type `Session` — so the Capability discriminator
-    is unaffected — and carries the `ReadOnly` marker as separate metadata."""
 
     def fn(*, db: ReadOnly[FakeSession]) -> None: ...
 
@@ -127,19 +100,10 @@ def test_unmarked_capability_carries_no_attenuation_marker() -> None:
     assert param.metadata == ()
 
 
-# the trap case
-
-
 def test_trap_keyword_only_optional_non_capability_is_optional_data() -> None:
-    """The load-bearing rule: `*, since: date | None = None` is
-    optional Data, NEVER a Capability — its keyword-only-with-default
-    shape mimics an injectable, and only the type-membership check
-    guards against the misread."""
 
     def fn(*, since: date | None = None) -> None: ...
 
-    # Register FakeSession to prove the registry is consulted; `date` is
-    # NOT registered, so `since` must stay Data.
     model = classify(fn, capability_types=[FakeSession])
 
     [(name, kind)] = [(p.name, p.kind) for p in model.parameters]
@@ -149,9 +113,6 @@ def test_trap_keyword_only_optional_non_capability_is_optional_data() -> None:
 
 
 def test_positional_of_capability_type_is_not_a_capability() -> None:
-    """A capability-typed param placed positionally is NOT a Capability —
-    keyword-only is a necessary condition. Compile fails this as a structural
-    error; the signature module only classifies."""
 
     def fn(db: FakeSession) -> None: ...
 
@@ -161,11 +122,6 @@ def test_positional_of_capability_type_is_not_a_capability() -> None:
 
 
 def test_empty_capability_registry_makes_every_kwonly_optional_data() -> None:
-    """With no registered capability types (the v1 default while the
-    capability registry is unpopulated), every keyword-only param —
-    including those typed as future capabilities — falls through to
-    optional Data. Compile will tighten this once the registry is
-    populated."""
 
     def fn(customer_id: int, *, db: FakeSession) -> None: ...
 
@@ -175,9 +131,6 @@ def test_empty_capability_registry_makes_every_kwonly_optional_data() -> None:
         ("customer_id", ParamKind.REQUIRED_DATA),
         ("db", ParamKind.OPTIONAL_DATA),
     ]
-
-
-# realistic mixed signature
 
 
 def test_mixed_signature_classifies_all_three_kinds() -> None:
@@ -230,13 +183,7 @@ def test_classification_matrix(fn, capability_types, expected) -> None:
     assert [(p.name, p.kind) for p in model.parameters] == expected
 
 
-# input schema
-
-
 def test_input_schema_excludes_capability_params() -> None:
-    """The input schema is the data-only signature — capability params
-    are removed so an enqueue caller cannot supply them, and a missing
-    capability cannot look like a missing input."""
 
     def fn(customer_id: int, *, since: date | None = None, db: FakeSession) -> None: ...
 
@@ -277,9 +224,6 @@ def test_input_schema_bind_rejects_misspelled_kwarg() -> None:
 
 
 def test_input_schema_bind_rejects_capability_named_input() -> None:
-    """Passing a capability's name as an input must fail at the call —
-    the input schema doesn't include it, so .bind() rejects it as an
-    unexpected kwarg."""
 
     def fn(*, db: FakeSession) -> None: ...
 
@@ -288,9 +232,6 @@ def test_input_schema_bind_rejects_capability_named_input() -> None:
     assert list(schema.signature.parameters) == []
     with pytest.raises(TypeError):
         schema.bind(db=FakeSession())
-
-
-# output type
 
 
 def test_output_type_captured() -> None:
@@ -309,12 +250,7 @@ def test_output_type_empty_when_no_annotation() -> None:
     assert model.output_type is inspect.Signature.empty
 
 
-# accepts a Signature directly
-
-
 def test_classify_accepts_a_raw_signature() -> None:
-    """Pure module — accepts either a callable or a Signature directly,
-    so a caller that already has one need not re-introspect."""
 
     def fn(x: int) -> None: ...
 

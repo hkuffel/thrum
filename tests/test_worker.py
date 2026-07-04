@@ -1,12 +1,3 @@
-"""Tracer-bullet tests: enqueue → claim → scope.run → record against real
-Postgres.
-
-Claim/Record/e2e exercise the real schema through the `session_factory` fixture.
-The in-transaction Execution Scope (injected session, success/failure split) has
-its own suite in test_scope.py. Assertions are on observable state (Run status,
-Attempt fields, returned payloads), never on internal wiring.
-"""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -25,14 +16,10 @@ LEASE = dt.timedelta(seconds=45)
 
 
 async def _enqueue(session_factory, key: str, **inputs):
-    """Enqueue a pending Run via the real `enqueue()` path; return its id."""
     async with session_factory() as session:
         run = enqueue(session, key, **inputs)
         await session.commit()
         return run.id
-
-
-# Claim (real DB)
 
 
 async def test_claim_marks_running_and_stamps_lease(session_factory):
@@ -60,8 +47,6 @@ async def test_claim_marks_running_and_stamps_lease(session_factory):
 async def test_claim_skip_locked_prevents_double_claim(session_factory):
     await _enqueue(session_factory, "billing.send_receipts", invoice_id=1)
 
-    # Two open transactions contend for the one claimable Run. The first holds a
-    # FOR UPDATE lock; the second must SKIP LOCKED past it and claim nothing.
     s1 = session_factory()
     s2 = session_factory()
     try:
@@ -84,9 +69,6 @@ async def test_claim_respects_capacity_limit(session_factory):
         claimed = await claim_runs(session, "worker-1", 2, LEASE)
 
     assert len(claimed) == 2
-
-
-# Record (real DB)
 
 
 async def test_record_success_sets_run_terminal(session_factory):
@@ -124,9 +106,6 @@ async def test_record_failure_sets_run_failed(session_factory):
         assert run.status == RunStatus.failed
         assert attempt.outcome == AttemptOutcome.failed
         assert attempt.error == "Traceback…"
-
-
-# End-to-end (real DB)
 
 
 async def test_e2e_enqueue_runs_to_succeeded(session_factory):

@@ -1,16 +1,3 @@
-"""App — projection host and phase-two validation finalizer (ADR-0023).
-
-A Registry owns identity; an App owns transports and the compile step, so naming
-and reaching stay separate as more transports arrive. `compile()` is phase two of
-two-phase validation: decoration does phase one, but resolving each Operation's
-capabilities and linting its serialization boundary can only run once the
-capability registry is populated, so they wait for startup. Failures aggregate
-into one `CompileError`; compile is idempotent, and `ensure_compiled()` is the
-on-first-start backstop.
-
-Stdlib only, no Worker or server imports (import-discipline law).
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -21,10 +8,6 @@ from thrum.jobs.signature import ParamKind, classify
 
 
 class CompileError(Exception):
-    """Raised by `app.compile()` when one or more Operations fail phase-two
-    validation. Aggregates every problem found so a developer fixes them in one
-    pass rather than one boot-crash at a time."""
-
     def __init__(self, problems: list[str]) -> None:
         self.problems = problems
         joined = "\n".join(f"  - {p}" for p in problems)
@@ -32,45 +15,25 @@ class CompileError(Exception):
 
 
 class App:
-    """The projection host. Owns operation discovery + `compile()`.
-
-    By default it discovers Operations from the process-global registry view
-    (every `@operation` / `@registry.operation` in the process). Pass a specific
-    `Registry` to scope discovery to that registry's namespace.
-
-    Capability types are registered with `provide(type, provider)`; registering
-    a provider for type `T` is exactly what makes `T` a registered capability
-    type that `compile()` resolves keyword-only params against.
-    """
-
     def __init__(self, registry: Registry | None = None) -> None:
         self._registry = registry
         self._providers: dict[type, Any] = {}
         self._compiled = False
 
     def provide(self, capability_type: type, provider: Any) -> None:
-        """Register a Provider for a Capability type. Registering type `T` is
-        what makes `T` resolvable as a Capability at compile time."""
         self._providers[capability_type] = provider
 
     @property
     def providers(self) -> dict[type, Any]:
-        """The registered Providers keyed by Capability type — what the
-        Execution Scope resolves keyword-only params against (ADR-0024)."""
         return dict(self._providers)
 
     @property
     def operations(self) -> dict[str, Operation]:
-        """The Operations this App finalizes — the scoped registry's, or the
-        process-global view when unscoped."""
         if self._registry is None:
             return dict(Registry._global)
         return {op.key: op for op in self._registry.operations.values()}
 
     def compile(self) -> None:
-        """Resolve capabilities and run the residual fail-fast checks. Raises
-        `CompileError` aggregating every problem. Idempotent: once compiled, a
-        re-run (explicit or implicit-on-first-start) is a no-op."""
         if self._compiled:
             return
 
@@ -85,17 +48,10 @@ class App:
         self._compiled = True
 
     def ensure_compiled(self) -> None:
-        """The implicit-on-first-start backstop. Identical to `compile()` —
-        first app/worker start calls this so the validated registry exists
-        before any Run executes."""
         self.compile()
 
 
 def _check_operation(op: Operation, capability_types: frozenset[type]) -> list[str]:
-    """Re-classify one Operation against the populated capability registry and
-    collect its phase-two problems. Classifying `op.fn` (not the captured
-    Signature) resolves PEP 563 string annotations so type-identity checks
-    against the registry work."""
     model = classify(op.fn, capability_types=capability_types)
     problems: list[str] = []
 
@@ -103,8 +59,6 @@ def _check_operation(op: Operation, capability_types: frozenset[type]) -> list[s
         if param.kind is ParamKind.CAPABILITY:
             continue
 
-        # A capability-typed param placed positionally — keyword-only is
-        # necessary for injection, so this is a structural error.
         if param.annotation in capability_types:
             problems.append(
                 f"{op.key}: capability-typed parameter {param.name!r} must be "
@@ -112,9 +66,6 @@ def _check_operation(op: Operation, capability_types: frozenset[type]) -> list[s
             )
             continue
 
-        # A keyword-only param with no default whose type is not registered:
-        # it looks injectable but nothing can supply it. An optional Data flag
-        # must carry a default (the `since: date | None = None` trap stays Data).
         if param.kind is ParamKind.OPTIONAL_DATA and not param.has_default:
             problems.append(
                 f"{op.key}: keyword-only parameter {param.name!r} matches no "

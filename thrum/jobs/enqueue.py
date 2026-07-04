@@ -1,13 +1,3 @@
-"""Transactional enqueue. Creates a Run inside the caller's own SQLAlchemy
-session, so the Run commits atomically with the surrounding business write —
-commit means it runs, rollback means it never existed.
-
-Critical: this happens in the APP process at creation time and executes nothing;
-execution is a separate two-process concern. The enqueued Run sits `pending`
-until a Worker process — running `thrum worker` somewhere, pointed at the same
-Postgres — claims it. Pass IDs, not live ORM objects; the Operation re-fetches.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -28,13 +18,9 @@ def enqueue(
     max_attempts: int | None = None,
     **inputs: Any,
 ) -> Run:
-    """Insert a `pending` Run on the caller's session. Does not commit — the
-    caller commits as part of their own transaction."""
 
     key = operation.key if isinstance(operation, Operation) else operation
 
-    # The queue's input serialization boundary — inputs become the `inputs`
-    # JSONB column, so reject a non-serializable value here, not in the encoder.
     for input_name, value in inputs.items():
         ensure_serializable(value, owner=key, role=f"input {input_name!r}")
 
@@ -46,11 +32,7 @@ def enqueue(
         status=RunStatus.pending,
         inputs=inputs,
         max_attempts=max_attempts,
-        # Freeze the Caller in the caller's own transaction so identity commits with
-        # the Run and thaws into the Scope at execution. v1 stamps the system
-        # default; a real Caller travels this same path once auth exists (ADR-0024).
         caller=Caller.system().freeze(),
-        # next_attempt_at left NULL == claimable immediately; backoff sets it later.
     )
     session.add(run)
     return run

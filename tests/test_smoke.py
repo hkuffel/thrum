@@ -1,14 +1,9 @@
-"""Smoke tests that lock in the scaffold's structural invariants."""
-
 from __future__ import annotations
 
 
 def test_core_import_does_not_pull_in_fastapi() -> None:
-    """The import-discipline law: importing the SDK core must not load the server
-    stack. Guards the whole `[server]`-extra boundary."""
     import sys
 
-    # Drop any prior import so this is a real check.
     for mod in list(sys.modules):
         if mod == "fastapi" or mod.startswith("fastapi."):
             del sys.modules[mod]
