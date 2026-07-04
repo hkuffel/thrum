@@ -61,6 +61,8 @@ def decode_argv(
             key, sep, value = token[2:].partition("=")
             if not sep:
                 index += 1
+                if index >= len(argv):
+                    raise TypeError(f"option --{key} requires a value")
                 value = argv[index]
             options[key.replace("-", "_")] = value
         else:

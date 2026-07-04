@@ -17,7 +17,7 @@ import inspect
 import types
 import uuid
 from decimal import Decimal
-from typing import Any, NoReturn, Union, get_args, get_origin
+from typing import Any, NoReturn, Union, get_args, get_origin, get_type_hints
 
 # JSON-native scalars plus the stdlib types that routinely encode to a JSON
 # scalar. The set catches ORM objects and arbitrary classes; it is not a strict
@@ -124,9 +124,19 @@ def is_serializable_annotation(annotation: Any) -> bool:
         # set/frozenset falls through to the scalar check, which rejects it.
         if issubclass(annotation, (list, tuple, dict)):
             return True
-        # A dataclass read type is serializable iff every field is
+        # A dataclass read type is serializable iff every field is. `field.type`
+        # is a PEP 563 string under `from __future__ import annotations`, so
+        # resolve the annotations to real types before checking them; an
+        # unresolvable forward ref falls back to the (lenient) raw field type.
         if dataclasses.is_dataclass(annotation):
-            return all(is_serializable_annotation(f.type) for f in dataclasses.fields(annotation))
+            try:
+                hints = get_type_hints(annotation)
+            except Exception:
+                hints = {}
+            return all(
+                is_serializable_annotation(hints.get(f.name, f.type))
+                for f in dataclasses.fields(annotation)
+            )
         return issubclass(annotation, _SERIALIZABLE_TYPES)
 
     return True  # forward-ref string or unknown object — be lenient

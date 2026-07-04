@@ -59,6 +59,13 @@ def test_decode_rejects_unknown_flag_via_bind() -> None:
         decode_argv(_fake_op(fn), ["alice", "--nope", "x"])
 
 
+def test_decode_rejects_trailing_flag_without_value() -> None:
+    def fn(limit: int = 0) -> dict: ...
+
+    with pytest.raises(TypeError, match="--limit requires a value"):
+        decode_argv(_fake_op(fn), ["--limit"])
+
+
 # encoding
 
 

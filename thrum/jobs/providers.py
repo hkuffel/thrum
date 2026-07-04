@@ -104,9 +104,12 @@ async def db_provider(ctx: ProviderContext, caller: Caller) -> AsyncIterator[Asy
         event.remove(sync_conn, "before_execute", _reject_write)
 
 
-# Textual DML: recover the verb from the SQL prefix, past leading comments.
+# Textual writes: recover the verb from the SQL prefix, past leading comments.
+# Covers DML (INSERT/UPDATE/DELETE), whole-table wipes (TRUNCATE), and schema
+# mutation (DDL) — none of which the ORM DML classes catch when issued via text().
 _TEXT_WRITE = re.compile(
-    r"^\s*(?:--[^\n]*\n|/\*.*?\*/\s*)*(INSERT|UPDATE|DELETE)\b",
+    r"^\s*(?:--[^\n]*\n|/\*.*?\*/\s*)*"
+    r"(INSERT|UPDATE|DELETE|TRUNCATE|MERGE|DROP|CREATE|ALTER|GRANT|REVOKE)\b",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -119,5 +122,5 @@ def _reject_write(
     ):
         raise PermissionError(
             "read-only capability: this Operation declared ReadOnly[Session] and may "
-            "not issue INSERT/UPDATE/DELETE"
+            "not issue writes (INSERT/UPDATE/DELETE/TRUNCATE or DDL)"
         )
