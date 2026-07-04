@@ -5,8 +5,7 @@ description: Conventions for writing good Python in the thrum repo — comment d
 
 # Writing Python in thrum
 
-House style for Python in this repo. Two parts: comment discipline (below, the part
-people get wrong most often) and general code standards (see
+House style for Python in this repo. Two parts: comment discipline and general code standards (see
 [python-standards.md](python-standards.md)).
 
 ## Comments
@@ -26,6 +25,10 @@ Get to the point. One claim per comment, stated plainly.
   docstring. Prose and, where it clarifies, a short indented code or predicate sketch.
 - No restating the signature. Types live in annotations; the docstring covers intent
   and contract, not the parameter list.
+- Don't explain something in a module docstring that you're going to re-explain
+  in the relevant function docstring. Don't explain something in a function
+  docstring that you're going to explain in a helper function docstring. Explain
+  logic at the closest point to the actual code you're explaining, once.
 
 ```python
 # WRONG: describes the obvious, hedges, digresses
@@ -51,6 +54,11 @@ A comment may point to a durable artifact: a code object (class or function name
 target exists before you cite it — a reference to an ADR the repo doesn't have is
 worse than no reference.
 
+Additionally, if you are going to reference an ADR, you should only be doing so
+when you're explaining something that looks very unintuitive on the surface and
+you're giving the reader a change to read further. Don't reference them willy
+nilly, it's annoying.
+
 Do not cite PRDs. They are transient implementation plans that get consumed once the
 work lands; a PRD number means nothing to someone reading the code later. If a PRD's
 decision is durable, it has a corresponding ADR — cite that instead.
@@ -65,21 +73,20 @@ durable doc, cite the doc.
 # Postgres is the clock authority (core-loop Q5): derive the lease window from
 # the DB clock, not the Worker's wall clock.
 
-# CORRECT: state the decision; cite the ADR that records it
+# CORRECT: state the decision
 # Derive the lease window from the DB clock, not the Worker's wall clock, so all
-# liveness comparisons share one clock (ADR-0013).
+# liveness comparisons share one clock.
 ```
 
 ### When a comment earns its place
 
-- A decision with live alternatives: why this approach over the obvious one.
+- A decision with more intuitive alternatives: why this approach over the obvious one.
 - A non-local invariant or ordering constraint the reader can't see from here.
 - A correctness-critical subtlety (concurrency, clock authority, transaction boundary).
-- A module docstring stating the file's responsibility and the contract it upholds.
 
-`thrum/jobs/worker/claim.py`'s module docstring is a good model for scope and
-tone — minus its `core-loop Q2/Q5` references, which are exactly the ephemeral
-citations to avoid.
+`src/thrum/jobs/scope.py`'s module docstring is a good model for scope and
+tone — notice that it gets in and out, and doesn't restate explanations that
+make more sense in fn docstrings or inline comments.
 
 ### Comment markers
 
@@ -96,7 +103,7 @@ A handful of markers carry a fixed shape. Use them and nothing looser.
 
 ## Public API surface
 
-The rules above govern internal code. thrum's *user-facing* API — the public
+The rules above govern internal code. thrum's _user-facing_ API — the public
 decorators, parameter builders, and classes a consumer imports and sees in tooltips
 or generated docs — follows a different, documentation-oriented style: per-parameter
 `Annotated[T, Doc(...)]`, markdown docstrings with a `## Example`, and almost no module
