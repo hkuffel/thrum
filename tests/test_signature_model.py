@@ -21,6 +21,7 @@ from datetime import date
 
 import pytest
 
+from thrum.jobs.providers import ReadOnly
 from thrum.jobs.signature import (
     InputSchema,
     ParamKind,
@@ -97,6 +98,33 @@ def test_multiple_capabilities_each_classified() -> None:
         ParamKind.CAPABILITY,
         ParamKind.CAPABILITY,
     ]
+
+
+# attenuation markers (ADR-0027)
+
+
+def test_read_only_marked_capability_unwraps_to_registered_type() -> None:
+    """`db: ReadOnly[Session]` is `Annotated[Session, ReadOnly]`: the classifier
+    unwraps it to the registered type `Session` — so the Capability discriminator
+    is unaffected — and carries the `ReadOnly` marker as separate metadata."""
+
+    def fn(*, db: ReadOnly[FakeSession]) -> None: ...
+
+    model = classify(fn, capability_types=[FakeSession])
+
+    [param] = model.parameters
+    assert param.kind is ParamKind.CAPABILITY
+    assert param.annotation is FakeSession
+    assert ReadOnly in param.metadata
+
+
+def test_unmarked_capability_carries_no_attenuation_marker() -> None:
+    def fn(*, db: FakeSession) -> None: ...
+
+    [param] = classify(fn, capability_types=[FakeSession]).parameters
+
+    assert param.kind is ParamKind.CAPABILITY
+    assert param.metadata == ()
 
 
 # the trap case

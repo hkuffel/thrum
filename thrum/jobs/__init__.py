@@ -9,7 +9,7 @@ Worker, scheduler, or server at load time (import-discipline law).
 
 from thrum.jobs.app import App, CompileError
 from thrum.jobs.enqueue import enqueue
-from thrum.jobs.providers import Caller, Provider, ProviderContext, db_provider
+from thrum.jobs.providers import Caller, Provider, ProviderContext, ReadOnly, db_provider
 from thrum.jobs.registry import (
     DeclaredSchedule,
     Operation,
@@ -25,6 +25,7 @@ __all__ = [
     "Operation",
     "Provider",
     "ProviderContext",
+    "ReadOnly",
     "Registry",
     "operation",
     "enqueue",

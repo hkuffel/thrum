@@ -27,6 +27,26 @@ def worker(dsn: str) -> None:
 
 
 @main.group()
+def runs() -> None:
+    """Inspect Runs"""
+
+
+@runs.command("list")
+@click.option("--dsn", envvar="THRUM_DSN", required=True)
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON instead of a table.")
+def runs_list(dsn: str, as_json: bool) -> None:
+    """List Runs straight from Postgres, no Worker or server running."""
+    import asyncio
+
+    from thrum.jobs.builtins import build_control_plane
+    from thrum.jobs.projection.cli import project
+
+    app = build_control_plane()
+    operation = app.operations["thrum.list_runs"]
+    click.echo(asyncio.run(project(app, operation, dsn, argv=[], as_json=as_json)))
+
+
+@main.group()
 def db() -> None:
     """Manage Thrum's dedicated `thrum` schema (ADR-0004)."""
 

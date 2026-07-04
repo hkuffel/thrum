@@ -33,8 +33,9 @@ class ParamKind(enum.Enum):
 class ClassifiedParam:
     name: str
     kind: ParamKind
-    annotation: Any
+    annotation: Any  # `Annotated` unwrapped to the registered type
     default: Any  # `inspect.Parameter.empty` when none
+    metadata: tuple[Any, ...] = ()  # `Annotated` extras, e.g. the `ReadOnly` marker
 
     @property
     def has_default(self) -> bool:
@@ -114,14 +115,15 @@ def classify(
     classified: list[ClassifiedParam] = []
     data_params: list[inspect.Parameter] = []
     for name, param in sig.parameters.items():
-        annotation = resolved_hints.get(name, param.annotation)
-        kind = _classify_param(param, annotation, cap_set)
+        registered_type, metadata = _unwrap_annotated(resolved_hints.get(name, param.annotation))
+        kind = _classify_param(param, registered_type, cap_set)
         classified.append(
             ClassifiedParam(
                 name=name,
                 kind=kind,
-                annotation=annotation,
+                annotation=registered_type,
                 default=param.default,
+                metadata=metadata,
             )
         )
         if kind is not ParamKind.CAPABILITY:
@@ -140,6 +142,16 @@ def classify(
         input_schema=input_schema,
         output_type=return_hint,
     )
+
+
+def _unwrap_annotated(annotation: Any) -> tuple[Any, tuple[Any, ...]]:
+    """Split `Annotated[T, *extras]` into `(T, extras)`; a bare annotation is
+    `(annotation, ())`. `T` drives capability discrimination and the
+    serialization lint; the extras carry attenuation markers."""
+    metadata = getattr(annotation, "__metadata__", None)
+    if metadata is None:
+        return annotation, ()
+    return annotation.__origin__, tuple(metadata)
 
 
 def _classify_param(

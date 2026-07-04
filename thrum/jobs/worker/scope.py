@@ -1,29 +1,30 @@
-"""Run one Operation inside one framework-owned transaction (ADR-0024).
+"""The durable rim: run one claimed Run through the shared Execution Scope,
+observing Effects and recording the Attempt outcome (ADR-0024).
 
-Assemble the Operation's Capabilities from registered Providers on a shared
-`AsyncExitStack`, inject them, run the body, then branch:
+The transport-agnostic core (`thrum.jobs.scope.ExecutionScope`) owns Capability
+assembly, the execution transaction, and output validation. This rim adds what is
+durable and the core knows nothing of:
 
-    success -> commit the succeeded Attempt, output, and observed Effects with
-               the body's own DB writes as one atomic fact.
-    failure -> roll all of it back, then record the failed Attempt + retry state
-               in a separate transaction.
+    success -> Effects and the `succeeded` Attempt (with output) commit atomically
+               with the body's own writes, inside the scope's transaction.
+    failure -> the transaction rolls back, then the `failed` Attempt + retry state
+               is recorded in a separate transaction, so the Run never hangs
+               `running` (ADR-0024).
 
-Worker death mid-execution raises `BaseException` (cancellation), not an
-Operation failure: it propagates uncaught, nothing commits, and the Run stays
-`running` with an open Attempt for the Reaper (ADR-0013).
+Worker death mid-execution raises `BaseException` (cancellation), not an Operation
+failure: it propagates uncaught, nothing commits, and the Run stays `running` with
+an open Attempt for the Reaper (ADR-0013).
 """
 
 from __future__ import annotations
 
-import inspect
 import traceback
-from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from thrum.jobs.models import AttemptOutcome
-from thrum.jobs.providers import Caller, ProviderContext
-from thrum.jobs.serialization import SerializationContractError, ensure_serializable
-from thrum.jobs.signature import ParamKind, classify
+from thrum.jobs.providers import Caller
+from thrum.jobs.scope import ExecutionScope
+from thrum.jobs.serialization import SerializationContractError
 from thrum.jobs.worker.effects import EffectRecorder
 from thrum.jobs.worker.execute import ExecutionResult
 from thrum.jobs.worker.record import record_result
@@ -42,10 +43,10 @@ async def run_scoped(
     operations: dict[str, Operation],
     providers: dict[type, Provider],
 ) -> None:
-    """Execute one claimed Run in the Scope's transaction. A missing Operation, a
-    raised body, or a non-serializable output becomes a `failed` Attempt recorded
-    in a separate transaction — never propagated, so the Worker loop keeps
-    turning."""
+    """Execute one claimed Run through the Execution Scope. A missing Operation, a
+    malformed Caller, a raised body, or a non-serializable output becomes a `failed`
+    Attempt recorded in a separate transaction — never propagated, so the Worker
+    loop keeps turning."""
     operation = operations.get(claimed.operation_key)
     if operation is None:
         await _record_failure(
@@ -56,71 +57,59 @@ async def run_scoped(
         )
         return
 
-    capabilities = _capability_params(operation.fn, providers)
-    failure: str | None = None
     try:
-        async with session_factory() as session, AsyncExitStack() as stack:
-            injected = {}
-            ctx = ProviderContext(session=session)
-            # catch a bad frozen Caller or a bad Provider `__aenter__` here and
-            # record a failed Attempt before the stack unwinds. Propagating a error raise
-            # here would mean the Reaper re-claims a bad row forever.
+        caller = Caller.thaw(claimed.caller)
+    except Exception:
+        # A malformed frozen Caller is an unfillable scope, not a worker death:
+        # record it `failed` so the Reaper never re-claims the bad row forever.
+        await _record_failure(
+            session_factory, claimed, operation, "Malformed frozen Caller on the Run"
+        )
+        return
+
+    scope = ExecutionScope(session_factory, providers)
+    failure: str | None = None
+    recorded_success = False
+    try:
+        async with scope.open(operation, caller) as bound:
             try:
-                caller = Caller.thaw(claimed.caller)
-                for name, capability_type in capabilities:
-                    injected[name] = await stack.enter_async_context(
-                        providers[capability_type](ctx, caller)
-                    )
-                # Execution transaction nests inside the stack: Provider teardown
-                # runs after commit on success, after rollback on a raised body.
-                async with session.begin():
-                    async with EffectRecorder.observing(session) as recorder:
-                        output = await _invoke(operation.fn, claimed.inputs, injected)
-                        # Flush the body's pending ORM writes through the recorder
-                        # before the block detaches them; raw executes already fired.
-                        await session.flush()
-                    ensure_serializable(output, owner=claimed.operation_key, role="output")
-                    await recorder.write(session, claimed.attempt_id)
-                    await record_result(
-                        session,
-                        claimed,
-                        ExecutionResult(AttemptOutcome.succeeded, output, None),
-                        operation,
-                    )
+                async with EffectRecorder.observing(bound.session) as recorder:
+                    output = await bound.run(claimed.inputs)
+                # Only write after observing detaches, so the framework's writes are
+                # never counted as the Operation's Effects.
+                await recorder.write(bound.session, claimed.attempt_id)
+                await record_result(
+                    bound.session,
+                    claimed,
+                    ExecutionResult(AttemptOutcome.succeeded, _as_run_output(output), None),
+                    operation,
+                )
+                recorded_success = True
             except SerializationContractError as exc:
-                # Record its message, not the traceback the generic handler below
-                # would otherwise capture for this same exception.
+                # Record its message, not a traceback; re-raise to roll back.
                 failure = str(exc)
+                raise
             except Exception:
                 failure = traceback.format_exc()
+                raise
     except Exception:
-        # Provider teardown raised during stack unwind. On success the Run already
-        # committed `succeeded`, so propagate rather than overwrite it. On the
-        # failure path nothing is recorded yet: swallow and record below.
-        if failure is None:
+        # A commit already recorded `succeeded`; a Provider teardown raising during
+        # unwind must propagate rather than overwrite it. Otherwise the raise is
+        # either the body failure captured above, or a Provider setup failure to
+        # record now — never a worker death, which is a `BaseException` left uncaught.
+        if recorded_success:
             raise
+        if failure is None:
+            failure = traceback.format_exc()
 
-    # Runs after the execution transaction rolled back and Providers tore down.
     if failure is not None:
         await _record_failure(session_factory, claimed, operation, failure)
 
 
-async def _invoke(fn, inputs: dict, injected: dict) -> dict | None:
-    """Call the body with inputs plus injected Capabilities, await if async. The
-    output column holds a dict; a non-dict return is dropped."""
-    result = fn(**inputs, **injected)
-    if inspect.isawaitable(result):
-        result = await result
-    return result if isinstance(result, dict) else None
-
-
-def _capability_params(fn, providers: dict[type, Provider]) -> list[tuple[str, type]]:
-    """(param name, capability type) pairs to inject, resolved against the
-    registered Provider types — the set Compile validated."""
-    if not providers:
-        return []
-    model = classify(fn, capability_types=frozenset(providers))
-    return [(p.name, p.annotation) for p in model.parameters if p.kind is ParamKind.CAPABILITY]
+def _as_run_output(output: Any) -> dict | None:
+    """`Run.output` is a JSONB object, so a non-dict body return is dropped on the
+    durable path (a synchronous projection keeps the full return value)."""
+    return output if isinstance(output, dict) else None
 
 
 async def _record_failure(
