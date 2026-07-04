@@ -1,7 +1,7 @@
 """Execution Scope tests (ADR-0024): the single-transaction injected-session
 model against real Postgres.
 
-The Scope owns Txn 2. A `scope_probe` table stands in for an Operation's own DB
+The Scope owns the execution transaction. A `scope_probe` table stands in for an Operation's own DB
 effects so a test can assert what committed: on success the probe write and the
 `succeeded` Attempt land together; on a raised body neither lands and the Attempt
 is recorded `failed` in a separate transaction. Assertions are on observable DB
@@ -107,7 +107,7 @@ async def test_injected_session_write_commits_with_attempt(session_factory):
     assert attempt.ended_at is not None
 
 
-# Failure: Txn 2 rolls back; the Attempt is recorded in a separate transaction
+# Failure: the execution transaction rolls back; the Attempt is recorded in a separate transaction
 
 
 async def test_raised_body_rolls_back_and_records_failed(session_factory):
@@ -123,7 +123,7 @@ async def test_raised_body_rolls_back_and_records_failed(session_factory):
 
     await run_scoped(session_factory, item, {operation.key: operation}, {AsyncSession: db_provider})
 
-    # Zero committed effects — the probe write rolled back with Txn 2.
+    # Zero committed effects — the probe write rolled back with the execution transaction.
     assert await _probe_count(session_factory) == 0
     async with session_factory() as session:
         run = await session.get(Run, run_id)
@@ -242,7 +242,7 @@ async def test_failure_path_teardown_raise_still_records_failed(session_factory)
 
 
 async def test_provider_teardown_raise_after_commit_preserves_success(session_factory):
-    # A Provider teardown that raises after Txn 2 commits must propagate, not be
+    # A Provider teardown that raises after the execution transaction commits must propagate, not be
     # caught and re-recorded as a failure over the already-`succeeded` Run.
     @asynccontextmanager
     async def exploding(ctx, caller):
@@ -267,7 +267,7 @@ async def test_provider_teardown_raise_after_commit_preserves_success(session_fa
     assert attempt.outcome == AttemptOutcome.succeeded
 
 
-# Crash before commit: a worker death mid-Txn-2 lands nothing; the Reaper recovers
+# Crash before commit: a worker death mid-execution lands nothing; the Reaper recovers
 
 
 async def test_crash_before_commit_lands_nothing_then_reruns(session_factory):

@@ -1,4 +1,4 @@
-"""Engine helpers. The async engine is the Worker's primary path (ADR-0005); the
+"""Engine helpers. The async engine is the Worker's primary path; the
 sync engine backs migrations and the CLI."""
 
 from __future__ import annotations

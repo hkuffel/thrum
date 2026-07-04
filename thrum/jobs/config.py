@@ -10,7 +10,9 @@ from dataclasses import dataclass
 class WorkerConfig:
     dsn: str
 
-    # Concurrency = backpressure (ADR-0005): claim only (max_in_flight - in_flight).
+    # Cap on Runs claimed per poll. (True claim-to-capacity backpressure —
+    # claiming only max_in_flight - in_flight — is not yet built; dispatch is
+    # serial, so in-flight never exceeds 1.)
     max_in_flight: int = 10
 
     # Dispatch (ADR-0008): polling is the source of truth; interruptible sleep so

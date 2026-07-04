@@ -29,12 +29,8 @@ def enqueue(
     **inputs: Any,
 ) -> Run:
     """Insert a `pending` Run on the caller's session. Does not commit — the
-    caller commits as part of their own transaction (that is the point).
+    caller commits as part of their own transaction."""
 
-    `max_attempts` carries a per-call durability override set by
-    `op.enqueue(..., retries=N)` as N+1; NULL means inherit the Operation's
-    default at execution time. Only the queue projection (enqueue) sets this;
-    non-durable projections (future HTTP) must leave it NULL."""
     key = operation.key if isinstance(operation, Operation) else operation
 
     # The queue's input serialization boundary — inputs become the `inputs`

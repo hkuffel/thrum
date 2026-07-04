@@ -1,5 +1,5 @@
 """The Effect recorder: observe what an Operation committed and record it as
-table-level Effect rows in Txn 2 (ADR-0024).
+table-level Effect rows in the execution transaction (ADR-0024).
 
 The recorder listens on the Scope's execution connection for Core DML
 (`after_execute`), aggregating every mutation to one `(table, kind)` entry with a
@@ -8,11 +8,8 @@ not 10k — the count comes from the cursor's rowcount, not from per-row events,
 which is also why a pure ORM `before_flush` listener cannot serve here.
 
 It is best-effort and isolated. Sharing the operation's transaction makes a
-listener that raises dangerous — it could abort Txn 2 and roll back real effects —
-so every observation is swallowed, and the Effect rows are written inside a
-SAVEPOINT so a failed write cannot doom the operation's commit. What is
-load-bearing is the atomicity of the records that do land, not the recording's
-reliability.
+listener that raises dangerous — it could abort the execution transaction and
+roll back real effects — so every observation is swallowed.
 """
 
 from __future__ import annotations
@@ -36,8 +33,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# Raw textual DML (the tests' `text("INSERT ...")`, hand-written statements) carries
-# no parse tree, so the verb and target are recovered from the SQL prefix.
+# Raw textual DML carries no parse tree,
+# so the verb and target are recovered from the SQL prefix.
 _TEXT_DML = (
     (EffectKind.insert, re.compile(r"^INSERT\s+INTO\s+([^\s(]+)", re.IGNORECASE)),
     (EffectKind.update, re.compile(r"^UPDATE\s+(?:ONLY\s+)?([^\s(]+)", re.IGNORECASE)),
@@ -95,8 +92,8 @@ class EffectRecorder:
             log.exception("Effect recorder failed to observe a statement; skipping it")
 
     async def write(self, session: AsyncSession, attempt_id: uuid.UUID) -> None:
-        """Write the aggregated Effects into Txn 2 inside a SAVEPOINT, so a write
-        failure rolls back only the Effect rows, never the operation's effects."""
+        """Write the aggregated Effects into the execution transaction inside a SAVEPOINT,
+        so a write failure rolls back only the Effect rows, never the operation's effects."""
         if not self._counts:
             return
         try:

@@ -5,12 +5,8 @@
 import path. The process-global view fails fast on a `namespace.name` collision
 at decoration/import time so the misconfiguration cannot reach the Worker.
 
-The `Operation` is the sole authoring surface — what the developer writes and
-what `.enqueue(...)` projects onto the queue. The Worker reads execution config
-off the registered Operation via duck-typed `.fn` / `.retry_policy`.
-
-SDK-core surface: stdlib + croniter only, no Worker/server imports (the
-import-discipline law)."""
+The `Operation` is the sole authoring surface. The Worker reads execution config
+off the registered Operation via duck-typed `.fn` / `.retry_policy`."""
 
 from __future__ import annotations
 
@@ -58,8 +54,7 @@ def _validate_timezone(tz: str) -> None:
     )
     if is_fixed_offset:
         raise ValueError(
-            f"Fixed-offset timezone {tz!r} is not allowed; use an IANA name "
-            f"like 'America/Vancouver' (ADR-0015)"
+            f"Fixed-offset timezone {tz!r} is not allowed; use an IANA name like 'America/Denver'"
         )
     try:
         ZoneInfo(tz)
@@ -69,7 +64,7 @@ def _validate_timezone(tz: str) -> None:
 
 @dataclass(frozen=True)
 class Operation(Generic[P, R]):
-    """The authored unit (ADR-0023) and the sole execution-config surface: it
+    """The authored unit and the sole execution-config surface: it
     holds resolved identity (`namespace.name`) and the captured signature,
     projects onto the durable queue via `.enqueue`, and carries the
     `fn` / `retry_policy` the Worker reads to execute a Run. Still directly
@@ -88,11 +83,11 @@ class Operation(Generic[P, R]):
     retry_max_delay: float = 300.0
     retry_backoff_factor: float = 2.0
     retry_jitter: bool = True
-    # Mutated in place by `.schedule()`. Excluded from eq/hash (compare=False)
-    # so the frozen dataclass stays hashable despite carrying a list — identity
-    # is `namespace.name`, not the schedule set.
+    # Mutated in place by `.schedule()`
     declared_schedules: list[DeclaredSchedule] = field(
-        default_factory=list, repr=False, compare=False
+        default_factory=list,
+        repr=False,
+        compare=False,  # stays hashable
     )
 
     @property
@@ -118,16 +113,10 @@ class Operation(Generic[P, R]):
         declared_duration: dt.timedelta | None = None,
         start_grace: dt.timedelta | None = None,
     ) -> DeclaredSchedule:
-        """Declare a recurring schedule co-located with this operation.
-
-        Validates `cron` and `tz` immediately (fail-fast at declaration time).
-        Records the `DeclaredSchedule` against this operation and into the
-        process-global schedule registry for Worker startup reconcile."""
+        """Declare a recurring schedule co-located with this operation."""
         _validate_cron(cron)
         _validate_timezone(tz)
-        # The `uq_schedules_task_cron` constraint keys on (namespace, name, cron)
-        # alone, so a repeated cron — even under a different tz — would collide in
-        # the startup reconcile's bulk upsert. Reject it here, not as an opaque
+        # Reject duplicates here, not as an opaque
         # Postgres cardinality violation at Worker startup.
         if any(existing.cron == cron for existing in self.declared_schedules):
             raise ValueError(f"Duplicate schedule cron {cron!r} on operation {self.key!r}")
@@ -146,21 +135,16 @@ class Operation(Generic[P, R]):
         return self.fn(*args, **kwargs)
 
     def enqueue(self, session: Session, *, retries: int | None = None, **inputs: Any) -> Run:
-        """Insert a `pending` Run on the caller's session. Validates `inputs`
-        against the operation's input schema (the data-only signature with
-        capability params stripped) so a missing or misspelled input — and a
-        capability-named input — fails at the call, not later in the worker.
+        """Insert a `pending` Run on the caller's session.
         Does not commit — the caller commits inside their own transaction.
 
         Pass `retries=N` to override the operation's durability default for
-        this one call only; omit it to inherit the operation's default. This
-        override is stored on the Run (as max_attempts = N+1) so the Worker
-        can read it at execution time. Non-durable projections (future HTTP)
+        this one call only, stored on the Run; omit it to inherit the operation's
+        default. Non-durable projections (future HTTP)
         must not pass this to the Run — durability semantics belong only to
         durable projections (queue/timer)."""
         # Python's own argument-binding rules over the data-only signature
         # surface the right diagnostic (missing required, unexpected kwarg)
-        # before any DB I/O.
         self.signature_model.input_schema.bind(**inputs)
 
         from thrum.jobs.enqueue import enqueue as _enqueue
@@ -170,14 +154,12 @@ class Operation(Generic[P, R]):
 
 
 class Registry:
-    """A named grouping that declares a namespace once. Many Registries coexist
-    (e.g. `billing`, `marketing`) so two functions named `send_receipts` don't
-    collide — `billing.send_receipts` and `marketing.send_receipts` are
-    distinct identities."""
+    """A named grouping that declares a namespace once. Allows for the multiple
+    operations with the same name to exist without collision."""
 
     # Process-global view used to fail fast on namespace.name collisions. Shared
     # by named Registries AND the implicit `default` registry that bare
-    # `@operation` resolves through, so the check is uniform.
+    # `@operation` resolves through.
     _global: dict[str, Operation] = {}
     _global_schedules: dict[str, list[DeclaredSchedule]] = {}
 
@@ -199,14 +181,8 @@ class Registry:
         retry_jitter: bool = True,
     ) -> Any:
         """Register an Operation under this Registry's namespace. Identity is
-        `namespace.name`; pass `name=` to override the function name for
-        the rare case where it isn't the identity you want. A duplicate
-        `namespace.name` (against any other Registry in the process, or
-        against the default registry) raises `ValueError` immediately.
-
-        Declare recurring schedules via `op.schedule(cron, tz=...)` after
-        decoration — schedules are co-located with the operation definition and
-        validated (cron expression + IANA timezone) at declaration time."""
+        `namespace.name`; pass `name=` to override the function name.
+        A duplicate raises `ValueError` immediately."""
 
         def register(func: Callable[..., Any]) -> Operation:
             op_name = name or func.__name__
@@ -239,8 +215,7 @@ class Registry:
 
 
 # The implicit Registry a bare `@operation` resolves through. Module-level so
-# bare uses share collision state with named Registries (the fail-fast check is
-# uniform across both paths).
+# bare uses share collision state with named Registries
 _default_registry = Registry("default")
 
 
@@ -268,8 +243,6 @@ def operation(
 ) -> Operation[P, R] | Callable[[Callable[P, R]], Operation[P, R]]:
     """Mark a function as a Thrum Operation. A bare `@operation` falls into
     the `default` namespace via the process-shared default Registry —
-    identity is `namespace.name`, user-owned and stable across refactors.
-    Pass `name=` to override the function name as the identity.
 
     Equivalent to `@_default_registry.operation` — the same fail-fast
     collision check applies."""

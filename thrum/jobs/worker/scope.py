@@ -1,21 +1,16 @@
-"""The Execution Scope: run one Operation inside one framework-owned transaction
-(ADR-0024).
+"""Run one Operation inside one framework-owned transaction (ADR-0024).
 
-The Scope owns the execution transaction ("Txn 2"). It assembles the Operation's
-Capabilities via registered Providers on a shared `AsyncExitStack`, injects them
-into the keyword-only capability params, runs the body, and branches:
+Assemble the Operation's Capabilities from registered Providers on a shared
+`AsyncExitStack`, inject them, run the body, then branch:
 
-    success  -> record the succeeded Attempt + output + the observed Effects in
-                Txn 2, commit. The Operation's DB writes, the Effect records, and
-                its completion record become one atomic fact.
-    failure  -> roll back Txn 2 (nothing lands), then record the failed Attempt
-                + retry state in a separate short transaction. The failure
-                outcome must not ride Txn 2 or it would roll back with the
-                doomed effects and the Run would hang `running` forever.
+    success -> commit the succeeded Attempt, output, and observed Effects with
+               the body's own DB writes as one atomic fact.
+    failure -> roll all of it back, then record the failed Attempt + retry state
+               in a separate transaction.
 
-A worker death mid-Txn-2 raises `BaseException` (cancellation), which is not an
-Operation-attributable failure: it propagates uncaught so nothing commits and the
-Run stays `running` with an open Attempt for the Reaper to recover (ADR-0013).
+Worker death mid-execution raises `BaseException` (cancellation), not an
+Operation failure: it propagates uncaught, nothing commits, and the Run stays
+`running` with an open Attempt for the Reaper (ADR-0013).
 """
 
 from __future__ import annotations
@@ -47,10 +42,10 @@ async def run_scoped(
     operations: dict[str, Operation],
     providers: dict[type, Provider],
 ) -> None:
-    """Execute one claimed Run inside the Scope's transaction. An unresolved
-    Operation, a raised body, and a non-serializable output all land as a
-    `failed` Attempt recorded in a separate transaction — never propagated, so
-    the Worker loop keeps turning."""
+    """Execute one claimed Run in the Scope's transaction. A missing Operation, a
+    raised body, or a non-serializable output becomes a `failed` Attempt recorded
+    in a separate transaction — never propagated, so the Worker loop keeps
+    turning."""
     operation = operations.get(claimed.operation_key)
     if operation is None:
         await _record_failure(
@@ -67,27 +62,22 @@ async def run_scoped(
         async with session_factory() as session, AsyncExitStack() as stack:
             injected = {}
             ctx = ProviderContext(session=session)
-            # The inner try covers Caller thaw and Provider setup through the
-            # commit so a malformed frozen Caller or a Provider __aenter__ that
-            # raises is recorded as a failed Attempt, not propagated — otherwise
-            # the Run hangs `running` and the Reaper re-claims the same bad row
-            # forever. It ends before the stack unwinds because a teardown that
-            # raises after a committed success must propagate, never be re-recorded
-            # over the already-`succeeded` Run. Txn 2 nests inside the stack so
-            # teardown runs after commit on success and after rollback on a raised
-            # body.
+            # catch a bad frozen Caller or a bad Provider `__aenter__` here and
+            # record a failed Attempt before the stack unwinds. Propagating a error raise
+            # here would mean the Reaper re-claims a bad row forever.
             try:
                 caller = Caller.thaw(claimed.caller)
                 for name, capability_type in capabilities:
                     injected[name] = await stack.enter_async_context(
                         providers[capability_type](ctx, caller)
                     )
+                # Execution transaction nests inside the stack: Provider teardown
+                # runs after commit on success, after rollback on a raised body.
                 async with session.begin():
                     async with EffectRecorder.observing(session) as recorder:
                         output = await _invoke(operation.fn, claimed.inputs, injected)
-                        # Force the body's pending ORM writes through the recorder
-                        # before the block exits and detaches; raw executes already
-                        # fired.
+                        # Flush the body's pending ORM writes through the recorder
+                        # before the block detaches them; raw executes already fired.
                         await session.flush()
                     ensure_serializable(output, owner=claimed.operation_key, role="output")
                     await recorder.write(session, claimed.attempt_id)
@@ -98,31 +88,26 @@ async def run_scoped(
                         operation,
                     )
             except SerializationContractError as exc:
-                # A non-serializable output rolled Txn 2 back; fail the Attempt
-                # with the contract error rather than a traceback (Run.output is
-                # JSONB; a raise there would loop the same bad output forever).
+                # Record its message, not the traceback the generic handler below
+                # would otherwise capture for this same exception.
                 failure = str(exc)
             except Exception:
                 failure = traceback.format_exc()
     except Exception:
-        # A Provider teardown raised during stack unwind. On the success path
-        # (failure is None) the Run already committed `succeeded` — let it
-        # propagate rather than overwrite that record. On the failure path the
-        # outcome is not yet recorded, so swallow it and record the failure
-        # below, keeping the batch loop turning.
+        # Provider teardown raised during stack unwind. On success the Run already
+        # committed `succeeded`, so propagate rather than overwrite it. On the
+        # failure path nothing is recorded yet: swallow and record below.
         if failure is None:
             raise
 
-    # The failure-path second transaction runs after Txn 2 has rolled back and
-    # the Providers are torn down — isolated, as ADR-0024 requires.
+    # Runs after the execution transaction rolled back and Providers tore down.
     if failure is not None:
         await _record_failure(session_factory, claimed, operation, failure)
 
 
 async def _invoke(fn, inputs: dict, injected: dict) -> dict | None:
-    """Call the Operation body with its inputs plus injected Capabilities,
-    awaiting an async body. The JSONB output column holds a dict; a non-dict
-    return is dropped."""
+    """Call the body with inputs plus injected Capabilities, await if async. The
+    output column holds a dict; a non-dict return is dropped."""
     result = fn(**inputs, **injected)
     if inspect.isawaitable(result):
         result = await result
@@ -130,8 +115,8 @@ async def _invoke(fn, inputs: dict, injected: dict) -> dict | None:
 
 
 def _capability_params(fn, providers: dict[type, Provider]) -> list[tuple[str, type]]:
-    """The (param name, capability type) pairs to inject, resolved against the
-    registered Provider types — the injection set Compile validated."""
+    """(param name, capability type) pairs to inject, resolved against the
+    registered Provider types — the set Compile validated."""
     if not providers:
         return []
     model = classify(fn, capability_types=frozenset(providers))
@@ -144,8 +129,8 @@ async def _record_failure(
     operation: Operation | None,
     error: str,
 ) -> None:
-    """The failure-path second transaction (today's `record.py`): close the
-    Attempt `failed` and retry-or-terminal, isolated from the rolled-back Txn 2."""
+    """Record the `failed` Attempt and its retry-or-terminal decision in its own
+    transaction, isolated from the rolled-back execution transaction (ADR-0024)."""
     async with session_factory() as session, session.begin():
         await record_result(
             session,

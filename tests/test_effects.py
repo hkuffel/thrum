@@ -2,7 +2,7 @@
 committed and surface "succeeded but committed zero Effects."
 
 Operations write into two probe tables so a test can assert the aggregated Effect
-rows the Scope recorded into Txn 2 — table-level, per-Attempt, with a row_count.
+rows the Scope recorded into the execution transaction — table-level, per-Attempt, with a row_count.
 Assertions are on observable DB state.
 """
 

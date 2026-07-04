@@ -1,8 +1,8 @@
 """effects: per-Attempt, table-level mutation records
 
 Adds the `effects` table (ADR-0024): one row per (table, kind) per Attempt with a
-`row_count`. The Effect recorder writes these into Txn 2 so they commit atomically
-with the operation's own effects.
+`row_count`. The Effect recorder writes these into the execution transaction
+so they commit atomically with the operation's own effects.
 
 The 0001 baseline is model-derived (`Base.metadata.create_all`), so a fresh
 database already has the table; this migration only creates it for databases that

@@ -1,6 +1,6 @@
-"""The Worker (CONTEXT.md): a standalone process that loads the user's Operation
+"""The Worker: a standalone process that loads the user's Operation
 code, claims due Runs from Postgres, and executes them out-of-process on one
-asyncio loop (ADR-0005).
+asyncio loop.
 
 Around the claim → execute → record path it runs the lease-recovery substrate: a
 per-Worker heartbeat renewing open leases (ADR-0013), leader election for the
@@ -45,18 +45,13 @@ async def run_once(
 ) -> int:
     """One claim → scope.run pass. Returns the number of Runs processed.
 
-    Claim commits in Txn 1 (releasing row locks) before any Operation executes;
-    the Execution Scope then runs each Run in Txn 2 with injected Capabilities
-    and records its outcome (ADR-0024). The testable seam beneath `Worker.run`.
+    The Claim transaction commits (releasing row locks) before any Operation
+    executes; the Execution Scope then runs each Run in its own transaction with injected
+    Capabilities and records its outcome (ADR-0024). The testable seam beneath `Worker.run`.
 
     `app` supplies both the operation and Provider registries. The bare
     `operations` mapping is the no-capability path the lower-level tracer tests
     drive directly; without an App there are no Providers to inject.
-
-    Breaking change (ADR-0024): with neither `app` nor `operations` this no
-    longer falls back to `Registry._global`. Operations resolve to an empty
-    mapping, so every claimed Run is recorded `failed` as unregistered. Pass an
-    App (as `Worker` does) to execute registered Operations.
     """
     if app is not None:
         operations = app.operations
@@ -133,11 +128,9 @@ class Worker:
             await leader_engine.dispose()
 
     async def _boot(self, session_factory: async_sessionmaker) -> None:
-        """Phase-two validation + schedule reconcile, before the first claim.
-        `app.compile()` resolves Capabilities and fails fast on an unresolvable
-        one, subsuming the schedule-assertion fail-fast slot (ADR-0024); the
-        claim loop must not start until it succeeds. The schedule reconcile then
-        writes declared schedules."""
+        """`app.compile()` resolves Capabilities and fails fast on an unresolvable
+        one; the claim loop must not start until it succeeds.
+        The schedule reconcile then writes declared schedules."""
         self.app.compile()
         await self._assert_schedules(session_factory)
 
@@ -159,9 +152,7 @@ class Worker:
 
     async def _heartbeat_loop(self, session_factory: async_sessionmaker) -> None:
         """Renew this Worker's open-Attempt leases every `heartbeat_interval`
-        (config; ≤ lease_ttl/3 so two missed ticks are needed to look orphaned)
-        until drain. A failed tick is swallowed so a transient DB blip cannot kill
-        the heartbeat — the next tick recovers well within the lease window."""
+        until drain. lease_ttl/3 so two missed ticks are needed to look orphaned."""
         assert self._stop is not None
         while not self._draining:
             try:
@@ -174,9 +165,9 @@ class Worker:
     async def _sweep_loop(self, leader_engine, session_factory: async_sessionmaker) -> None:
         """Contend for the sweep lock each tick; while held, run the reconciliation
         sweep (materialize + mark missed + reap). The advisory-lock connection is
-        held open for the whole loop, so on this Worker's death Postgres releases
-        the lock and the next Worker wins (ADR-0007). AUTOCOMMIT keeps that
-        connection out of an idle-in-transaction state between `try`s."""
+        held open for the whole loop, so Postgres releases the lock
+        on this Worker's death and the next Worker wins (ADR-0007). AUTOCOMMIT
+        keeps that connection out of an idle-in-transaction state between `try`s."""
         from thrum.jobs.scheduler import Scheduler
         from thrum.jobs.scheduler.election import try_acquire_sweep_lock
 

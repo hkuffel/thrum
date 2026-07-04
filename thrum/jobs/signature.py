@@ -1,18 +1,16 @@
-"""Signature model — the pure, I/O-free module that classifies an Operation's
-parameters and derives its data contract (ADR-0023).
+"""Signature model: pure, I/O-free, classifies an Operation's
+parameters and derives its data contract.
 
 Given a signature and the injected set of registered capability types, each
-parameter is REQUIRED_DATA (positional — inputs every transport must carry),
-CAPABILITY (keyword-only with a type in the registered set — framework-injected),
-or OPTIONAL_DATA (any other keyword-only param). The type-membership check is what
-separates an optional input from a capability and guards the `*, since: date |
-None = None` trap.
+parameter is:
+    - REQUIRED_DATA (positional inputs every transport must carry)
+    - CAPABILITY (keyword-only with a type in the registered set, framework-injected)
+    - OPTIONAL_DATA (any other keyword-only param).
+
+The type-membership check is what separates an optional input from a capability.
 
 The capability set is injected, not discovered here, so v1 callers pass an empty
-set and the same path tightens once Compile supplies the real registry. From the
-classification this derives the input schema `op.enqueue` validates against, so
-bad inputs fail at the call rather than in the Worker.
-"""
+set and the same path tightens once Compile supplies the real registry."""
 
 from __future__ import annotations
 
@@ -33,11 +31,6 @@ class ParamKind(enum.Enum):
 
 @dataclass(frozen=True)
 class ClassifiedParam:
-    """One parameter's classification — its name, kind, and the
-    annotation + default carried from the original signature so
-    downstream consumers (Compile, serialization lint) need not
-    re-introspect."""
-
     name: str
     kind: ParamKind
     annotation: Any
@@ -61,8 +54,7 @@ class InputSchema:
     def bind(self, /, **inputs: Any) -> inspect.BoundArguments:
         """Validate `**inputs` against the data-only signature.
         Raises `TypeError` on missing required, unexpected kwarg,
-        etc. — Python's own argument-binding rules surface the right
-        diagnostic without us re-inventing them."""
+        etc."""
         return self.signature.bind(**inputs)
 
 

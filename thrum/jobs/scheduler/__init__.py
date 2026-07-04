@@ -1,9 +1,8 @@
-"""The scheduler is a leader-elected *role*, not a process (ADR-0007). The Worker
-that wins a Postgres advisory lock additionally runs this loop; the rest are warm
-failover. No separate deployable.
+"""The scheduler is a leader-elected role. The Worker that wins a Postgres advisory lock
+additionally runs this loop; the rest are warm
+failover. No separate deployable process.
 
-As of 0003 the sweep runs all three duties of one query family — "rows in the
-wrong state for the current clock" — on a single cadence (ADR-0013):
+three duties:
 materialize the horizon, mark missed occurrences, reap orphaned Attempts.
 """
 

@@ -22,7 +22,7 @@ class Attempt(Base):
     run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id"), index=True)
     attempt_number: Mapped[int] = mapped_column(Integer)
 
-    # Lease / liveness (ADR-0013). The claim txn stamps claimed_by + started_at +
+    # Lease / liveness (ADR-0013). The claim transaction stamps claimed_by + started_at +
     # lease_expires_at; the Worker heartbeats lease_expires_at while executing.
     # Reaper predicate: ended_at IS NULL AND lease_expires_at < now().
     claimed_by: Mapped[str] = mapped_column(String(128))  # Worker id

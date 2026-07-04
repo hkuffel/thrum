@@ -14,7 +14,7 @@ Consequences of the reversal:
 
 ## The Execution Scope owns the transaction (the `db` Capability is not special)
 
-The transaction does **not** belong to the `db` Provider; it belongs to the **Execution Scope**. The scope opens one transaction ("Txn 2"), hands every Provider a context exposing it, and each Provider constructs a Capability that *records its effects into that transaction*. The scope — not any Provider — commits.
+The transaction does **not** belong to the `db` Provider; it belongs to the **Execution Scope**. The scope opens one transaction (the **execution transaction**), hands every Provider a context exposing it, and each Provider constructs a Capability that *records its effects into that transaction*. The scope — not any Provider — commits.
 
 - **`db` Capability** = the scope's session, surfaced directly. The most *direct* capability (and the only one that reads *back* from the transaction, not just writes into it).
 - **External-effect Capabilities** (mailer/payments) = recording proxies whose calls **stage rows into the same transaction** (the Outbox), dispatched post-commit.
@@ -29,23 +29,23 @@ Providers register on the **App** (`app.provide(Session, db_provider)`) — regi
 
 The VISION's "a job runs inside one transaction" is a statement about **effects ⊕ outcome**, *not* about the claim. Claim cannot fold in — it must commit early to release the `SELECT … FOR UPDATE SKIP LOCKED` lock, which is the whole reason the lease/heartbeat machinery (ADR-0013) exists.
 
-- **Txn 1 — Claim** (unchanged). Insert the Attempt with its lease, flip the Run → `running`, commit, release the lock. Lease + heartbeat cover liveness from here.
-- **Txn 2 — Execute + Effects + Record** (the Execution Scope). Construct Capabilities against it, run the operation body, record Effects + the completion record, commit together.
+- **The Claim transaction** (unchanged). Insert the Attempt with its lease, flip the Run → `running`, commit, release the lock. Lease + heartbeat cover liveness from here.
+- **The execution transaction — Execute + Effects + Record** (the Execution Scope). Construct Capabilities against it, run the operation body, record Effects + the completion record, commit together.
 
 **Accepted cost:** a long operation now holds an open transaction + connection for its full duration — the very thing ADR-0013's claim/execute split avoided. This is the unavoidable price of "effects commit with the outcome" (you cannot keep the effects' transaction closed until the outcome is known). Accepted for now; revisit if long operations bite (e.g. an opt-in degraded mode for long runs).
 
 ### Success and failure are asymmetric transaction shapes (deliberate)
 
 - **Success: one transaction.** Effects ⊕ Effect-records ⊕ Attempt-close(`succeeded`) ⊕ `output` commit together. The atomicity win.
-- **Failure: two transactions.** The operation raised ⇒ Txn 2 **rolls back** (partial effects *and* their Effect-records discarded — nothing landed). Then a **separate short transaction** writes Attempt-close(`failed`) + retry state (`pending` + `next_attempt_at`) — structurally today's `record.py`, which survives on the failure path. The failure outcome **must not** ride Txn 2, or it would roll back with the doomed effects and the Run would hang `running` forever.
+- **Failure: two transactions.** The operation raised ⇒ the execution transaction **rolls back** (partial effects *and* their Effect-records discarded — nothing landed). Then a **separate short transaction** writes Attempt-close(`failed`) + retry state (`pending` + `next_attempt_at`) — structurally today's `record.py`, which survives on the failure path. The failure outcome **must not** ride the execution transaction, or it would roll back with the doomed effects and the Run would hang `running` forever.
 
 This is required, not a compromise: a failure's whole purpose is that its effects do not persist, so there is nothing for the outcome to be atomic *with*.
 
 ## Effect recording and the Zero-Effect wedge
 
-Effects are observed by instrumenting the framework-constructed session and are recorded **in Txn 2** (so the records that land commit atomically with the effects — no dual write). The recording mechanism is **best-effort and isolated — strengthened, not relaxed**, by sharing the operation's transaction: a listener that raised could roll back real effects, so it must never abort Txn 2. (This corrects the grill's initial "promoted to load-bearing" framing: what is load-bearing is the *atomicity of the records that do land*, not the recording's reliability.)
+Effects are observed by instrumenting the framework-constructed session and are recorded **in the execution transaction** (so the records that land commit atomically with the effects — no dual write). The recording mechanism is **best-effort and isolated — strengthened, not relaxed**, by sharing the operation's transaction: a listener that raised could roll back real effects, so it must never abort the execution transaction. (This corrects the grill's initial "promoted to load-bearing" framing: what is load-bearing is the *atomicity of the records that do land*, not the recording's reliability.)
 
-**v1 Effect shape:** one row per `(table, kind)` (`insert`/`update`/`delete`) per **Attempt**, with a `row_count` — table-level aggregation, not per-row primary keys (a 10k-row batch must not write 10k Effect rows). Keys off the **Attempt**: each Attempt commits its own Txn 2, so a failed Attempt's writes (and Effect-records) roll back and commit zero Effects.
+**v1 Effect shape:** one row per `(table, kind)` (`insert`/`update`/`delete`) per **Attempt**, with a `row_count` — table-level aggregation, not per-row primary keys (a 10k-row batch must not write 10k Effect rows). Keys off the **Attempt**: each Attempt commits its own execution transaction, so a failed Attempt's writes (and Effect-records) roll back and commit zero Effects.
 
 **Zero-Effect** (`succeeded` but committed zero Effects) is a **derived flag**, never a `status` change — observability must not mutate lifecycle state. A legitimate no-op (idempotent re-run, a filter that correctly matched nothing) is a succeeded-with-zero-Effects Run; the flag informs rather than fails. Opt-in *enforcement* (an operation that declares it **must** write) is a later **postcondition** feature.
 
@@ -61,7 +61,7 @@ A Caller is born at the **transport boundary**. Synchronous transports (HTTP/MCP
 
 v1 ships only `db`, so there are no external calls to stage or memoize. Both mechanisms are **shapes fixed, build deferred** to when the first external-effect Capability lands (VISION M4):
 
-- **Outbox** — fire-and-forget intent (email/webhook) **staged into Txn 2** (atomic with effects), drained post-commit by an **at-least-once** dispatcher (so staged effects must carry an idempotency key for the receiver).
+- **Outbox** — fire-and-forget intent (email/webhook) **staged into the execution transaction** (atomic with effects), drained post-commit by an **at-least-once** dispatcher (so staged effects must carry an idempotency key for the receiver).
 - **Step-recording** — a *distinct* mechanism: memoize an external call's **result** by step id and replay it on retry (read-back, exactly-once memoization; the replay-engine seed).
 
 They are deliberately **separate** (not one table): write-only-at-least-once delivery vs read-back-exactly-once memoization are opposite semantics; fusing them forces mode-specific nullable columns and forked handling everywhere. No `job_outbox`/`job_steps` table in v1 — a later additive migration is cheap pre-release (ADR-0004).
@@ -82,7 +82,7 @@ This forces a **wiring decision**: the Worker must be **handed the App** (which 
 - **Keep Design B (instrument the user's own engine + contextvar attribution).** Rejected: it was right for tomtar's drop-in-runner product, wrong for thrum's author-against-the-framework product, and it forfeits the capability thesis (the framework must *own* the object to attenuate and bind it). See the reversal section.
 - **The `db` Provider owns the transaction.** Rejected: forces one exception to the Provider model on day one. "The scope owns the transaction, every Capability records into it" makes `db` the simplest case of one uniform rule instead.
 - **A single transaction including Claim.** Impossible: Claim must commit to release the SKIP LOCKED lock; the lease/heartbeat split (ADR-0013) exists precisely so execution happens outside the claim transaction.
-- **Record the failure outcome inside Txn 2.** Rejected: it rolls back with the discarded effects and the Run hangs `running`. Failure is two transactions by necessity.
+- **Record the failure outcome inside the execution transaction.** Rejected: it rolls back with the discarded effects and the Run hangs `running`. Failure is two transactions by necessity.
 - **Auto-fail "succeeded but zero effects."** Rejected: observability must not change `status`; legitimate no-ops exist; auto-failing collides with at-least-once retry (ADR-0014). It is a derived flag; enforcement is opt-in postconditions later.
 - **One table for outbox + step-recording.** Rejected: opposite semantics (at-least-once write-only vs exactly-once read-back) force mode-specific nullable columns and forked handling.
 
