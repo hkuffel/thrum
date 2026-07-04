@@ -66,6 +66,12 @@ def test_decode_rejects_trailing_flag_without_value() -> None:
         decode_argv(_fake_op(fn), ["--limit"])
 
 
+def test_decode_coerces_optional_scalar_option() -> None:
+    def fn(*, limit: int | None = None) -> dict: ...
+
+    assert decode_argv(_fake_op(fn), ["--limit", "5"]) == {"limit": 5}
+
+
 # encoding
 
 

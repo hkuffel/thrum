@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import types
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -80,6 +81,11 @@ def decode_argv(
 
 
 def _coerce(value: str, annotation: Any) -> Any:
+    if get_origin(annotation) in (Union, types.UnionType):
+        # Optional[T] / T | None — coerce against the first non-None member.
+        for arg in get_args(annotation):
+            if arg is not type(None):
+                return _coerce(value, arg)
     if annotation is int:
         return int(value)
     if annotation is float:
