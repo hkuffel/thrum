@@ -54,10 +54,13 @@ async def list_runs(
 ) -> list[RunView]:
     """List Runs newest-first, narrowed by any supplied filters.
 
-    Filters compose: ``status`` scopes to one lifecycle state (``missed`` surfaces
-    the cron wedge), ``operation`` to one ``namespace.name`` identity, and
-    ``since`` / ``until`` to a ``created_at`` window with each bound independent.
-    Read-only, so exempt from the Zero-Effect flag.
+    The filters compose. Read-only, so exempt from the Zero-Effect flag.
+
+    Args:
+        status: A lifecycle state to scope to; ``missed`` surfaces the cron wedge.
+        operation: A ``namespace.name`` identity to isolate one Operation.
+        since: The inclusive lower bound of the ``created_at`` window.
+        until: The inclusive upper bound of the ``created_at`` window.
 
     Raises:
         ValueError: If a filter value is malformed — an unknown status, an
@@ -90,7 +93,11 @@ def _apply_filters(
 
 
 def _parse_status(value: str) -> RunStatus:
-    """Resolve a status filter to a RunStatus, naming the valid set on a miss."""
+    """Resolve a status filter to a RunStatus, naming the valid set on a miss.
+
+    Raises:
+        ValueError: If ``value`` is not a RunStatus member.
+    """
     try:
         return RunStatus(value)
     except ValueError:
@@ -99,7 +106,12 @@ def _parse_status(value: str) -> RunStatus:
 
 
 def _parse_operation(value: str) -> tuple[str, str]:
-    """Split an ``namespace.name`` operation filter into its two parts."""
+    """Split a ``namespace.name`` operation filter into its two parts.
+
+    Raises:
+        ValueError: If ``value`` lacks a ``.`` separating a non-empty namespace
+            and name.
+    """
     namespace, sep, name = value.rpartition(".")
     if not sep or not namespace or not name:
         raise ValueError(f"invalid operation {value!r}; expected 'namespace.name'")
@@ -107,7 +119,11 @@ def _parse_operation(value: str) -> tuple[str, str]:
 
 
 def _parse_timestamp(bound: str, value: str) -> dt.datetime:
-    """Parse an ISO 8601 window bound, naming which bound failed."""
+    """Parse an ISO 8601 window bound, naming which bound failed.
+
+    Raises:
+        ValueError: If ``value`` is not an ISO 8601 timestamp.
+    """
     try:
         return dt.datetime.fromisoformat(value)
     except ValueError:
