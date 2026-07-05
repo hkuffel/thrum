@@ -61,6 +61,7 @@ def decode_argv(
 
     Raises:
         TypeError: If an option lacks a value or the inputs fail schema binding.
+        ValueError: If a token does not parse as its annotated type.
     """
     model = classify(operation.fn, capability_types=capability_types)
     annotations = {
@@ -109,9 +110,15 @@ def _coerce(name: str, value: str, annotation: Any) -> Any:
             if arg is not type(None):
                 return _coerce(name, value, arg)
     if annotation is int:
-        return int(value)
+        try:
+            return int(value)
+        except ValueError:
+            raise ValueError(f"invalid {name} {value!r}; expected an integer") from None
     if annotation is float:
-        return float(value)
+        try:
+            return float(value)
+        except ValueError:
+            raise ValueError(f"invalid {name} {value!r}; expected a number") from None
     if annotation is bool:
         return value.lower() in ("1", "true", "yes", "on")
     if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
