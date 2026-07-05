@@ -162,7 +162,14 @@ async def test_filters_compose(session_factory, migrated_dsn):
     listed = await _list(
         session_factory,
         migrated_dsn,
-        ["--status", "failed", "--operation", "billing.charge", "--since", "2026-01-01"],
+        [
+            "--status",
+            "failed",
+            "--operation",
+            "billing.charge",
+            "--since",
+            "2026-01-01T00:00:00+00:00",
+        ],
     )
 
     assert {r["id"] for r in listed} == {target}
@@ -171,6 +178,11 @@ async def test_filters_compose(session_factory, migrated_dsn):
 async def test_unknown_status_raises_clean_value_error(session_factory, migrated_dsn):
     with pytest.raises(ValueError, match="unknown status 'bogus'"):
         await _list(session_factory, migrated_dsn, ["--status", "bogus"])
+
+
+async def test_naive_since_raises_clean_value_error(session_factory, migrated_dsn):
+    with pytest.raises(ValueError, match="expected an ISO 8601 timestamp with a UTC offset"):
+        await _list(session_factory, migrated_dsn, ["--since", "2026-01-01"])
 
 
 def test_bad_filter_value_is_a_clean_cli_error(migrated_dsn):

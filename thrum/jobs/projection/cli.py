@@ -100,10 +100,12 @@ def _coerce(name: str, value: str, annotation: Any) -> Any:
 
     An optional type is coerced to its non-``None`` member. Numeric scalars,
     enums, and ISO 8601 timestamps are parsed; anything else is left as the raw
-    string. ``name`` labels the parameter in a parse-failure message.
+    string. A ``datetime`` must carry a UTC offset, since it is compared against
+    timezone-aware columns. ``name`` labels the parameter in a parse-failure message.
 
     Raises:
-        ValueError: If ``value`` does not parse as the annotated type.
+        ValueError: If ``value`` does not parse as the annotated type, or a
+            ``datetime`` value is naive (missing a timezone offset).
     """
     if get_origin(annotation) in (Union, types.UnionType):
         for arg in get_args(annotation):
@@ -129,9 +131,18 @@ def _coerce(name: str, value: str, annotation: Any) -> Any:
             raise ValueError(f"unknown {name} {value!r}; expected one of: {allowed}") from None
     if annotation in (datetime, date, time):
         try:
-            return annotation.fromisoformat(value)
+            parsed = annotation.fromisoformat(value)
         except ValueError:
             raise ValueError(f"invalid {name} timestamp {value!r}; expected ISO 8601") from None
+        # TIMESTAMPTZ columns are compared against timezone-aware datetimes; a naive
+        # value (e.g. a date-only string) would reach asyncpg and raise a non-ValueError,
+        # bypassing the CLI's clean error path. Reject it here instead.
+        if annotation is datetime and parsed.tzinfo is None:
+            raise ValueError(
+                f"invalid {name} timestamp {value!r}; "
+                "expected an ISO 8601 timestamp with a UTC offset"
+            )
+        return parsed
     return value
 
 
