@@ -57,7 +57,8 @@ async def list_runs(
     The filters compose. Read-only, so exempt from the Zero-Effect flag.
 
     Args:
-        status: A lifecycle state to scope to; ``missed`` surfaces the cron wedge.
+        status: A lifecycle state to scope to; ``missed`` lists scheduled
+            occurrences whose fire time passed without ever starting.
         operation: A ``namespace.name`` identity to isolate one Operation.
         since: The inclusive lower bound of the ``created_at`` window.
         until: The inclusive upper bound of the ``created_at`` window.
