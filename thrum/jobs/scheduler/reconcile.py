@@ -1,3 +1,11 @@
+"""Reconciling code-declared Schedules against their durable rows.
+
+Startup asserts each declared Schedule into the table and stamps it seen; a
+Schedule that stops being declared goes stale and is deactivated by the sweep,
+so removing a ``schedule(...)`` from code stops future materialization without a
+manual pause.
+"""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -18,6 +26,17 @@ async def assert_declared_schedules(
     session: AsyncSession,
     declared: dict[str, list[DeclaredSchedule]],
 ) -> int:
+    """Upsert the currently declared Schedules and stamp each as freshly seen.
+
+    Reactivates a previously stale row when its declaration returns, and updates
+    the timing policy to match code.
+
+    Args:
+        declared: Declared Schedules keyed by Operation ``namespace.name``.
+
+    Returns:
+        The number of rows inserted or updated.
+    """
     if not declared:
         return 0
 
@@ -59,6 +78,14 @@ async def pause_stale_schedules(
     session: AsyncSession,
     stale_threshold: dt.timedelta,
 ) -> int:
+    """Deactivate Schedules not re-declared within ``stale_threshold``.
+
+    This is the code-declaration side of active state, distinct from an
+    operator's manual pause.
+
+    Returns:
+        The number of Schedules deactivated.
+    """
     stmt = (
         update(Schedule)
         .where(

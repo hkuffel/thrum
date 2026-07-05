@@ -1,3 +1,5 @@
+"""The durable models. Importing this ensures every table is on Base.metadata."""
+
 from thrum.jobs.models.attempt import Attempt
 from thrum.jobs.models.base import SCHEMA, Base
 from thrum.jobs.models.effect import Effect

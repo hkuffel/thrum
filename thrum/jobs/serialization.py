@@ -1,3 +1,12 @@
+"""The v1 serialization contract for an Operation's Data and output.
+
+Data and output must be addressable — reconstructable on the far side of a
+transport's time/process gap. v1 ships only the identity Codec, so that contract
+reduces to JSON-of-scalars: this module both checks a runtime value
+(``ensure_serializable``) and a static annotation (``is_serializable_annotation``)
+against it. Richer Codecs (blob staging, structural) are future work.
+"""
+
 from __future__ import annotations
 
 import dataclasses
@@ -8,6 +17,8 @@ import uuid
 from decimal import Decimal
 from typing import Any, NoReturn, Union, get_args, get_origin, get_type_hints
 
+# The scalar leaves the identity Codec accepts. Containers and dataclasses are
+# walked structurally down to these; anything else is rejected.
 _SERIALIZABLE_TYPES = (
     str,
     int,
@@ -23,14 +34,30 @@ _SERIALIZABLE_TYPES = (
 
 
 class SerializationContractError(TypeError):
-    pass
+    """A value or annotation breaches the JSON serialization contract."""
 
 
 def ensure_serializable(value: Any, *, owner: str, role: str) -> None:
+    """Assert a runtime value satisfies the serialization contract.
+
+    Args:
+        owner: The Operation key, named in the error to locate the breach.
+        role: What the value is ("input" or "output"), named in the error.
+
+    Raises:
+        SerializationContractError: If the value, walked recursively, contains a
+            leaf that is not JSON-serializable. The message names the offending
+            path within the value.
+    """
     _check(value, [], owner, role)
 
 
 def _check(value: Any, path: list[str], owner: str, role: str) -> None:
+    """Recursively walk a value to its leaves, rejecting the first non-scalar.
+
+    ``path`` accumulates the location of the current node (dict keys, list
+    indices, dataclass fields) so a rejection can point at exactly where.
+    """
     if isinstance(value, dict):
         for key, item in value.items():
             if not isinstance(key, str):
@@ -67,6 +94,17 @@ def _reject(offender: Any, path: list[str], owner: str, role: str) -> NoReturn:
 
 
 def is_serializable_annotation(annotation: Any) -> bool:
+    """Decide statically whether a type satisfies the serialization contract.
+
+    Used at Compile to reject a non-addressable Data parameter or return type
+    before any Run exists. An unannotated or ``None`` type is accepted; a
+    ``NewType`` defers to its supertype (so an ``int``-backed ``CustomerId``
+    passes). A parameterized container is serializable iff its element types
+    are; a bare container without type args is accepted optimistically.
+
+    Returns:
+        True if the annotation can be represented as JSON, False otherwise.
+    """
     if annotation is inspect.Signature.empty:
         return True
     if annotation is None or annotation is type(None):
@@ -81,6 +119,7 @@ def is_serializable_annotation(annotation: Any) -> bool:
         if origin in (Union, types.UnionType):
             return all(is_serializable_annotation(a) for a in get_args(annotation))
         if origin in (set, frozenset):
+            # JSON has no set type; only a list/tuple/dict survives the boundary.
             return False
         if origin in (list, tuple, dict):
             return all(

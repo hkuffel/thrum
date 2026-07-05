@@ -1,3 +1,5 @@
+"""Heartbeat — extending the Lease on a Worker's open Attempts."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -16,6 +18,14 @@ async def renew_leases(
     worker_id: str,
     lease_ttl: dt.timedelta,
 ) -> int:
+    """Push the Lease expiry forward on every open Attempt this Worker holds.
+
+    The new expiry is computed from the DB clock so all Workers and the Reaper
+    agree on liveness.
+
+    Returns:
+        The number of Leases renewed.
+    """
     db_now = (await session.execute(select(func.now()))).scalar_one()
     new_expiry = db_now + lease_ttl
     result = await session.execute(

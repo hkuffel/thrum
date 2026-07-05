@@ -1,3 +1,5 @@
+"""The Attempt model — one try at executing a Run, and where the Lease lives."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -11,6 +13,20 @@ from thrum.jobs.models.enums import AttemptOutcome
 
 
 class Attempt(Base):
+    """One try at executing a Run; a retry adds an Attempt, not a new Run.
+
+    The Attempt is the durable Execution — Effects key off it, not the Run — and
+    it carries the Lease. An open Attempt (``ended_at IS NULL``) with an expired
+    Lease is an orphan the Reaper reclaims.
+
+    Attributes:
+        claimed_by: The Worker holding the Lease.
+        lease_expires_at: Lease deadline, renewed by the Heartbeat while running.
+        ended_at: When the Attempt closed; ``None`` while it is still open.
+        outcome: The terminal outcome, set when the Attempt ends.
+        error: Failure detail, when the outcome is a failure.
+    """
+
     __tablename__ = "attempts"
     __table_args__ = (UniqueConstraint("run_id", "attempt_number", name="uq_attempts_run_number"),)
 

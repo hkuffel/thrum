@@ -6,6 +6,12 @@ import pytest_asyncio
 
 @pytest.fixture(autouse=True)
 def _clean_global_registry():
+    """Isolate each test's Operation declarations from the process-global registry.
+
+    Operations register into process-wide tables at import, so without this a
+    decorator in one test would collide with or leak into the next. Snapshots
+    and restores both tables around every test.
+    """
     from thrum import Registry
 
     saved_ops = Registry._global.copy()
@@ -23,6 +29,7 @@ def _clean_global_registry():
 
 @pytest.fixture(scope="session")
 def postgres_dsn() -> str:
+    """A throwaway Postgres via testcontainers, skipping if it is unavailable."""
     try:
         from testcontainers.postgres import PostgresContainer
     except ModuleNotFoundError:
@@ -37,6 +44,7 @@ def postgres_dsn() -> str:
 
 @pytest.fixture(scope="session")
 def migrated_dsn(postgres_dsn: str) -> str:
+    """The container DSN with Thrum's schema migrated once for the whole session."""
     from thrum.jobs.db.migrations import upgrade
 
     upgrade(postgres_dsn)
@@ -45,6 +53,7 @@ def migrated_dsn(postgres_dsn: str) -> str:
 
 @pytest_asyncio.fixture
 async def session_factory(migrated_dsn: str):
+    """A session factory against a freshly truncated schema, isolating each test."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker
 

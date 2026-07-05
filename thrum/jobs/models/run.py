@@ -1,3 +1,5 @@
+"""The Run model — a single durable execution of an Operation."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -19,9 +21,42 @@ from thrum.jobs.models.enums import RunStatus, Trigger
 
 
 class Run(Base):
+    """A single durable execution of an Operation with a status lifecycle.
+
+    A Run is created by one of three triggers — a Schedule, an Enqueue call, or
+    a workflow step — and moves through ``pending → running → succeeded/failed``.
+    It is the row the dashboard shows, the unit Dispatch claims, and the parent
+    of 1..N Attempts (a retry adds an Attempt, never a new Run).
+
+    Attributes:
+        schedule_id: The owning Schedule, or ``None`` for an ad-hoc Enqueue.
+        trigger: Which of the three triggers created this Run.
+        fire_time: The logical identity of a scheduled occurrence ("Tuesday's
+            02:00 run"); ``None`` for ad-hoc Runs.
+        next_attempt_at: When the Run next becomes claimable — set ahead for a
+            retry backoff.
+        caller: The authenticated identity frozen onto the Run at Enqueue and
+            thawed into the Execution Scope when the Worker runs it.
+        max_attempts: The retry budget snapshotted from the Operation, or
+            ``None`` to defer to the executing Worker's default.
+        expected_start_at: The Expectation snapshot — when the Run should start,
+            captured immutably at materialization and never read live.
+        expected_finish_by: The Expectation deadline the Overrun flag measures
+            against.
+        expected_duration: The expected wall-clock duration from the Schedule's
+            policy.
+        created_version: The Operation Fingerprint stamped at creation. Stored
+            in v1 though nothing reads it until v2, because code is never
+            persisted and so cannot be recomputed retroactively.
+    """
+
     __tablename__ = "runs"
     __table_args__ = (
+        # (schedule_id, fire_time) is an occurrence's identity: the uniqueness
+        # is what makes the materialization sweep idempotent and crash-safe.
         UniqueConstraint("schedule_id", "fire_time", name="uq_runs_schedule_fire_time"),
+        # Covers the Dispatch query, which selects claimable Runs by status and
+        # next_attempt_at, ordered by fire_time.
         Index("ix_runs_claimable", "status", "next_attempt_at", "fire_time"),
     )
 

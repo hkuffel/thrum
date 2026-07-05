@@ -1,3 +1,5 @@
+"""The Reaper — recovering Runs orphaned by a dead Worker."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -11,6 +13,16 @@ if TYPE_CHECKING:
 
 
 async def reap_orphans(session: AsyncSession) -> int:
+    """Close Attempts whose Lease lapsed and return their Runs to claimable.
+
+    An open Attempt with an expired Lease is presumed abandoned by a dead
+    Worker: it is closed as ``abandoned`` and its Run reset to ``pending`` and
+    made immediately claimable. Locked with ``SKIP LOCKED`` so a concurrent
+    sweep or claim never blocks.
+
+    Returns:
+        The number of orphaned Attempts reaped.
+    """
     orphans = (
         (
             await session.execute(

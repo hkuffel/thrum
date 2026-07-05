@@ -1,3 +1,5 @@
+"""The Effect model — an observed data mutation, keyed off the Attempt."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -11,6 +13,14 @@ from thrum.jobs.models.enums import EffectKind
 
 
 class Effect(Base):
+    """One ``(table, kind)`` mutation an Operation made, with a row count.
+
+    Recorded into the Attempt's own transaction so effects and the completion
+    record commit atomically. Keyed on the Attempt, not the Run: a failed
+    Execution rolls back and commits zero Effects. Table-level granularity, never
+    per-row keys or per-value data.
+    """
+
     __tablename__ = "effects"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

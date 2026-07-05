@@ -1,3 +1,11 @@
+"""The Scheduler role and its single reconciliation sweep.
+
+The Worker that wins the advisory lock runs this sweep on a cadence:
+materialize future Runs, mark missed occurrences, reap orphaned Attempts, and
+pause schedules no longer declared. One sweep, one transaction — orphan and
+missed detection are one query family.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,6 +23,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SweepResult:
+    """Counts of what one sweep changed, for logging and tests."""
+
     materialized: int = 0
     missed: int = 0
     reaped: int = 0
@@ -22,6 +32,8 @@ class SweepResult:
 
 
 class Scheduler:
+    """Runs the reconciliation sweep for the elected Scheduler Worker."""
+
     def __init__(
         self,
         config: SchedulerConfig,
@@ -31,6 +43,7 @@ class Scheduler:
         self._session_factory = session_factory
 
     async def sweep(self) -> SweepResult:
+        """Run one reconciliation pass, all four duties in a single transaction."""
         async with self._session_factory() as session, session.begin():
             materialized = await materialize_schedules(session, self.config.horizon)
             missed = await mark_missed(session, self.config.effective_miss_grace)

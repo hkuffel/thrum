@@ -21,8 +21,6 @@ docstrings, and module-level docstrings at the top of a file.
 Get to the point. One claim per comment, stated plainly.
 
 - No parentheticals or asides. Cut the digression or promote it to its own sentence.
-- No markdown — no bold, no backticked headings, no bullet scaffolding inside a
-  docstring. Prose and, where it clarifies, a short indented code or predicate sketch.
 - No restating the signature. Types live in annotations; the docstring covers intent
   and contract, not the parameter list.
 - Don't explain something in a module docstring that you're going to re-explain
@@ -49,24 +47,11 @@ count += 1
 
 ### Reference only things that exist in the codebase
 
-A comment may point to a durable artifact: a code object (class or function name),
-`CONTEXT.md`, or an ADR by its real identifier (`ADR-0008`, `docs/adr/`). Verify the
-target exists before you cite it — a reference to an ADR the repo doesn't have is
-worse than no reference.
-
-Additionally, if you are going to reference an ADR, you should only be doing so
-when you're explaining something that looks very unintuitive on the surface and
-you're giving the reader a change to read further. Don't reference them willy
-nilly, it's annoying.
-
-Do not cite PRDs. They are transient implementation plans that get consumed once the
-work lands; a PRD number means nothing to someone reading the code later. If a PRD's
-decision is durable, it has a corresponding ADR — cite that instead.
-
 Never reference ephemeral artifacts from an authoring or chat session: `Option 2`,
 `Grill question 8`, `core-loop Q5`, `Q2`. These mean nothing to a future reader and
 cannot be looked up. If the reasoning matters, state the reasoning; if it lives in a
-durable doc, cite the doc.
+durable doc, cite the doc, ONLY IF IT IS VERY NON-INTUITIVE. YOU SHOULD ALMOST
+NEVER NEED TO DO THIS.
 
 ```python
 # WRONG (see thrum/jobs/worker/claim.py): cites a session artifact
@@ -74,8 +59,7 @@ durable doc, cite the doc.
 # the DB clock, not the Worker's wall clock.
 
 # CORRECT: state the decision
-# Derive the lease window from the DB clock, not the Worker's wall clock, so all
-# liveness comparisons share one clock.
+# Derive the lease window from the DB clock, not the Worker's wall clock
 ```
 
 ### When a comment earns its place
@@ -84,31 +68,12 @@ durable doc, cite the doc.
 - A non-local invariant or ordering constraint the reader can't see from here.
 - A correctness-critical subtlety (concurrency, clock authority, transaction boundary).
 
-`src/thrum/jobs/scope.py`'s module docstring is a good model for scope and
-tone — notice that it gets in and out, and doesn't restate explanations that
-make more sense in fn docstrings or inline comments.
+## Docstring standards
 
-### Comment markers
-
-A handful of markers carry a fixed shape. Use them and nothing looser.
-
-- `# Ref: <url>` — an external durable artifact (spec section, PR, issue) that
-  justifies a workaround. Put it on the line above the code it explains.
-- `# TODO: <action> once <condition>` — a TODO names both the action and the
-  condition that retires it. A TODO with no exit condition is a wish, not a marker.
-- `# Vendored from <source> to <reason>` — provenance for copied code, so the next
-  reader knows where to resync it from and why it diverged.
-- Tooling suppressions are always specific: `# noqa: B004`, `# pragma: no cover`,
-  `# type: ignore[arg-type]`. Never blanket `# noqa` or bare `# type: ignore`.
-
-## Public API surface
-
-The rules above govern internal code. thrum's _user-facing_ API — the public
-decorators, parameter builders, and classes a consumer imports and sees in tooltips
-or generated docs — follows a different, documentation-oriented style: per-parameter
-`Annotated[T, Doc(...)]`, markdown docstrings with a `## Example`, and almost no module
-docstrings. That style, distilled from FastAPI, is the one exception to the no-markdown
-rule above. See [public-api-docstrings.md](public-api-docstrings.md).
+standards on docstring formatting are in
+[google-docstring-standards.md](google-docstring-standards.md). Standards on
+docstring content are in [PEP-257.md](PEP-257.md). Examples are in
+[example-google-docstrings.md](example-google-style-docstrings.md).
 
 ## Code standards
 

@@ -1,3 +1,10 @@
+"""The CLI projection — reaching an Operation from argv against local Postgres.
+
+Runs an Operation inline through the shared Execution Scope with no server: parse
+argv into the Operation's Data inputs, invoke it as the system Caller, and render
+the output as a table or JSON. A co-equal projection, not a client of an API.
+"""
+
 from __future__ import annotations
 
 import json
@@ -23,6 +30,15 @@ if TYPE_CHECKING:
 async def project(
     app: App, operation: Operation, dsn: str, argv: list[str], *, as_json: bool = False
 ) -> str:
+    """Invoke an Operation from CLI arguments and render its output.
+
+    Args:
+        argv: The Operation's inputs as CLI tokens (positionals and ``--opt``).
+        as_json: Render JSON instead of a text table.
+
+    Returns:
+        The rendered output, ready to print.
+    """
     inputs = decode_argv(operation, argv, capability_types=frozenset(app.providers))
     engine = make_async_engine(dsn)
     try:
@@ -36,6 +52,15 @@ async def project(
 def decode_argv(
     operation: Operation, argv: list[str], *, capability_types: frozenset[type] = frozenset()
 ) -> dict[str, Any]:
+    """Parse CLI tokens into an Operation's Data inputs, coerced to their types.
+
+    Positional tokens fill the required Data params in order; ``--name value``
+    and ``--name=value`` fill named params. Values are coerced to the param's
+    annotated type, then validated against the input schema.
+
+    Raises:
+        TypeError: If an option lacks a value or the inputs fail schema binding.
+    """
     model = classify(operation.fn, capability_types=capability_types)
     annotations = {
         p.name: p.annotation for p in model.parameters if p.kind is not ParamKind.CAPABILITY
@@ -69,6 +94,11 @@ def decode_argv(
 
 
 def _coerce(value: str, annotation: Any) -> Any:
+    """Coerce a string token to its annotated scalar type.
+
+    An optional type is coerced to its non-``None`` member; anything not int,
+    float, or bool is left as the raw string.
+    """
     if get_origin(annotation) in (Union, types.UnionType):
         for arg in get_args(annotation):
             if arg is not type(None):
@@ -83,10 +113,12 @@ def _coerce(value: str, annotation: Any) -> Any:
 
 
 def encode_json(output: Any) -> str:
+    """Render output as indented JSON."""
     return json.dumps(_to_jsonable(output), indent=2)
 
 
 def encode_table(output: Any) -> str:
+    """Render output as a fixed-width text table, one row per record."""
     rows = _rows(output)
     if not rows:
         return "(no rows)"
@@ -101,6 +133,10 @@ def encode_table(output: Any) -> str:
 
 
 def _rows(output: Any) -> list[dict[str, Any]]:
+    """Normalize output into a list of row dicts for tabular rendering.
+
+    A scalar or non-dict element becomes a single ``value`` column.
+    """
     jsonable = _to_jsonable(output)
     if jsonable is None:
         return []
@@ -112,6 +148,7 @@ def _rows(output: Any) -> list[dict[str, Any]]:
 
 
 def _to_jsonable(value: Any) -> Any:
+    """Recursively convert dataclasses, UUIDs, dates, and Decimals to JSON types."""
     if is_dataclass(value) and not isinstance(value, type):
         return {f.name: _to_jsonable(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, dict):

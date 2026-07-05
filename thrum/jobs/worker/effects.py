@@ -1,3 +1,11 @@
+"""Effect recording — observing an Execution's data mutations.
+
+The recorder instruments the framework-owned session, counting rows per
+``(table, kind)``, and writes one Effect per pair into the Operation's own
+transaction. Observation is best-effort and isolated: a recorder that raised
+could roll back real effects, so every observation and write is guarded.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +27,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Raw-text DML this recorder can attribute to a table, for statements issued as
+# text rather than ORM constructs.
 _TEXT_DML = (
     (EffectKind.insert, re.compile(r"^INSERT\s+INTO\s+([^\s(]+)", re.IGNORECASE)),
     (EffectKind.update, re.compile(r"^UPDATE\s+(?:ONLY\s+)?([^\s(]+)", re.IGNORECASE)),
@@ -29,6 +39,8 @@ _LEADING_NOISE = re.compile(r"^(?:\s+|--[^\n]*|/\*.*?\*/)+", re.DOTALL)
 
 
 class EffectRecorder:
+    """Tallies DML on a session for the duration of one Execution."""
+
     def __init__(self) -> None:
         self._counts: Counter[tuple[str, EffectKind]] = Counter()
         self._conn: Connection | None = None
@@ -36,6 +48,12 @@ class EffectRecorder:
     @classmethod
     @asynccontextmanager
     async def observing(cls, session: AsyncSession):
+        """Record every mutation on ``session`` while the context is open.
+
+        Yields:
+            The recorder; call ``write`` before the transaction commits to
+            persist the tally.
+        """
         recorder = cls()
         recorder._attach((await session.connection()).sync_connection)
         try:
@@ -53,6 +71,8 @@ class EffectRecorder:
             self._conn = None
 
     def _after_execute(self, conn, clauseelement, multiparams, params, execution_options, result):
+        # Isolation: a raise here would abort the Operation's own transaction, so
+        # a failed observation is logged and dropped, never propagated.
         try:
             classified = _classify(clauseelement)
             if classified is None:
@@ -66,6 +86,11 @@ class EffectRecorder:
             log.exception("Effect recorder failed to observe a statement; skipping it")
 
     async def write(self, session: AsyncSession, attempt_id: uuid.UUID) -> None:
+        """Persist the tallied Effects, one row per ``(table, kind)``.
+
+        Written in a savepoint and guarded so a recording failure rolls back
+        only the Effect rows, never the Operation's real writes.
+        """
         if not self._counts:
             return
         try:
@@ -84,6 +109,12 @@ class EffectRecorder:
 
 
 def _classify(clauseelement) -> tuple[EffectKind, str] | None:
+    """Identify the mutation kind and target table of a statement, if any.
+
+    Returns:
+        A ``(kind, table)`` pair, or ``None`` if the statement is not a
+        recognized write.
+    """
     if isinstance(clauseelement, Insert):
         return EffectKind.insert, clauseelement.table.name
     if isinstance(clauseelement, Update):
@@ -100,10 +131,17 @@ def _classify(clauseelement) -> tuple[EffectKind, str] | None:
 
 
 def _bare_name(token: str) -> str:
+    """Strip a schema qualifier and quotes from a table token."""
     return token.rsplit(".", 1)[-1].strip('"')
 
 
 async def is_zero_effect(session: AsyncSession, attempt_id: uuid.UUID) -> bool:
+    """Whether an Attempt succeeded yet committed no Effects — the wedge signal.
+
+    Returns:
+        True only when the Attempt's outcome is ``succeeded`` and it recorded
+        zero Effects; False if it failed or recorded any.
+    """
     row = (
         await session.execute(
             select(Attempt.outcome, func.count(Effect.id))

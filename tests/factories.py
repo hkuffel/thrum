@@ -16,6 +16,12 @@ def make_operation(
     max_attempts: int = 1,
     **config: Any,
 ) -> Operation:
+    """Build an Operation directly, bypassing the decorator and its registration.
+
+    Lets a test construct an Operation with an explicit identity without touching
+    the global registry. ``max_attempts`` is expressed as a total and mapped to
+    the Operation's ``retries`` (attempts minus one).
+    """
     return Operation(
         fn=fn,
         namespace=namespace,

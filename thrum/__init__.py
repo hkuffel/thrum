@@ -1,3 +1,10 @@
+"""Thrum — a Postgres-native background-jobs system.
+
+The public authoring surface: define Operations with ``@operation`` or a
+``Registry``, wire them onto transports with an ``App``, and mark read-only
+Capabilities with ``ReadOnly``.
+"""
+
 from __future__ import annotations
 
 from thrum.jobs.app import App as App

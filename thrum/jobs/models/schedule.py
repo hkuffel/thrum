@@ -1,3 +1,5 @@
+"""The Schedule model — a recurring rule that materializes Runs on a cadence."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -10,6 +12,21 @@ from thrum.jobs.models.base import Base
 
 
 class Schedule(Base):
+    """The durable form of a code-declared recurring trigger.
+
+    Stores the cron + IANA timezone intent — never precomputed future instants —
+    plus the Expectation policy the SLO engine measures against. Active state has
+    two independent axes: whether the code still declares it
+    (``declaration_active``) and whether an operator has paused it
+    (``operationally_paused_at``); it materializes Runs only when both allow.
+
+    Attributes:
+        declaration_active: False once the Operation stops declaring this cron.
+        last_declared_at: When the declaration was last seen at startup.
+        operationally_paused_at: When an operator paused it, if paused.
+        operationally_paused_by: Who paused it.
+    """
+
     __tablename__ = "schedules"
     __table_args__ = (
         UniqueConstraint(
@@ -50,4 +67,5 @@ class Schedule(Base):
 
     @property
     def is_active(self) -> bool:
+        """Whether the Schedule should materialize Runs — declared and not paused."""
         return self.declaration_active and self.operationally_paused_at is None

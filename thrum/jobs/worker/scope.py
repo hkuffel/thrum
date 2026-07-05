@@ -1,3 +1,11 @@
+"""Worker-side orchestration of one Execution end to end.
+
+Ties the Worker's claimed work to the framework's Execution Scope: thaw the
+Caller, open the scope, record Effects, run the Operation, and write the result
+and Effects into the one transaction the scope commits. A failure rolls that
+transaction back and is recorded separately, so effects never outlive a failure.
+"""
+
 from __future__ import annotations
 
 import traceback
@@ -25,6 +33,13 @@ async def run_scoped(
     operations: dict[str, Operation],
     providers: dict[type, Provider],
 ) -> None:
+    """Execute one claimed Run, recording its success or failure durably.
+
+    Success writes the result and Effects into the scope's transaction and lets
+    it commit. Any failure — unknown Operation, malformed Caller, or a raising
+    body — is captured, the execution transaction rolled back, and the failure
+    recorded in a fresh transaction so no partial effects survive.
+    """
     operation = operations.get(claimed.operation_key)
     if operation is None:
         await _record_failure(
@@ -66,16 +81,21 @@ async def run_scoped(
                 failure = traceback.format_exc()
                 raise
     except Exception:
+        # A raise after success means the commit itself failed; the result was
+        # never durably recorded, so surface it rather than masking it as an
+        # Operation failure.
         if recorded_success:
             raise
         if failure is None:
             failure = traceback.format_exc()
 
+    # Recorded in a new transaction: the execution transaction has rolled back.
     if failure is not None:
         await _record_failure(session_factory, claimed, operation, failure)
 
 
 def _as_run_output(output: Any) -> dict | None:
+    """Keep a dict output for JSONB storage; discard any other shape."""
     return output if isinstance(output, dict) else None
 
 
@@ -85,6 +105,7 @@ async def _record_failure(
     operation: Operation | None,
     error: str,
 ) -> None:
+    """Record a failed outcome for the Attempt in its own transaction."""
     async with session_factory() as session, session.begin():
         await record_result(
             session,
