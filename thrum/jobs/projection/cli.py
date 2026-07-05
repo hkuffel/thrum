@@ -7,6 +7,7 @@ the output as a table or JSON. A co-equal projection, not a client of an API.
 
 from __future__ import annotations
 
+import enum
 import json
 import types
 from dataclasses import fields, is_dataclass
@@ -85,30 +86,45 @@ def decode_argv(
 
     inputs: dict[str, Any] = {}
     for name, value in zip(model.input_schema.required, positionals, strict=False):
-        inputs[name] = _coerce(value, annotations[name])
+        inputs[name] = _coerce(name, value, annotations[name])
     for key, value in options.items():
-        inputs[key] = _coerce(value, annotations.get(key, str))
+        inputs[key] = _coerce(key, value, annotations.get(key, str))
 
     model.input_schema.bind(**inputs)
     return inputs
 
 
-def _coerce(value: str, annotation: Any) -> Any:
+def _coerce(name: str, value: str, annotation: Any) -> Any:
     """Coerce a string token to its annotated scalar type.
 
-    An optional type is coerced to its non-``None`` member; anything not int,
-    float, or bool is left as the raw string.
+    An optional type is coerced to its non-``None`` member. Numeric scalars,
+    enums, and ISO 8601 timestamps are parsed; anything else is left as the raw
+    string. ``name`` labels the parameter in a parse-failure message.
+
+    Raises:
+        ValueError: If ``value`` does not parse as the annotated type.
     """
     if get_origin(annotation) in (Union, types.UnionType):
         for arg in get_args(annotation):
             if arg is not type(None):
-                return _coerce(value, arg)
+                return _coerce(name, value, arg)
     if annotation is int:
         return int(value)
     if annotation is float:
         return float(value)
     if annotation is bool:
         return value.lower() in ("1", "true", "yes", "on")
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        try:
+            return annotation(value)
+        except ValueError:
+            allowed = ", ".join(str(member.value) for member in annotation)
+            raise ValueError(f"unknown {name} {value!r}; expected one of: {allowed}") from None
+    if annotation in (datetime, date, time):
+        try:
+            return annotation.fromisoformat(value)
+        except ValueError:
+            raise ValueError(f"invalid {name} timestamp {value!r}; expected ISO 8601") from None
     return value
 
 

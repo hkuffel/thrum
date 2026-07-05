@@ -47,10 +47,10 @@ class RunView:
 async def list_runs(
     *,
     db: ReadOnly[AsyncSession],
-    status: str | None = None,
+    status: RunStatus | None = None,
     operation: str | None = None,
-    since: str | None = None,
-    until: str | None = None,
+    since: dt.datetime | None = None,
+    until: dt.datetime | None = None,
 ) -> list[RunView]:
     """List Runs newest-first, narrowed by any supplied filters.
 
@@ -64,8 +64,7 @@ async def list_runs(
         until: The inclusive upper bound of the ``created_at`` window.
 
     Raises:
-        ValueError: If a filter value is malformed — an unknown status, an
-            operation key without a namespace, or a non-ISO timestamp.
+        ValueError: If ``operation`` is not a ``namespace.name`` key.
     """
     query = select(Run).order_by(Run.created_at.desc())
     query = _apply_filters(query, status, operation, since, until)
@@ -75,35 +74,22 @@ async def list_runs(
 
 def _apply_filters(
     query: Select[tuple[Run]],
-    status: str | None,
+    status: RunStatus | None,
     operation: str | None,
-    since: str | None,
-    until: str | None,
+    since: dt.datetime | None,
+    until: dt.datetime | None,
 ) -> Select[tuple[Run]]:
-    """Narrow the Runs query by each supplied filter, validating as it goes."""
+    """Narrow the Runs query by each supplied filter."""
     if status is not None:
-        query = query.where(Run.status == _parse_status(status))
+        query = query.where(Run.status == status)
     if operation is not None:
         namespace, name = _parse_operation(operation)
         query = query.where(Run.operation_namespace == namespace, Run.operation_name == name)
     if since is not None:
-        query = query.where(Run.created_at >= _parse_timestamp("since", since))
+        query = query.where(Run.created_at >= since)
     if until is not None:
-        query = query.where(Run.created_at <= _parse_timestamp("until", until))
+        query = query.where(Run.created_at <= until)
     return query
-
-
-def _parse_status(value: str) -> RunStatus:
-    """Resolve a status filter to a RunStatus, naming the valid set on a miss.
-
-    Raises:
-        ValueError: If ``value`` is not a RunStatus member.
-    """
-    try:
-        return RunStatus(value)
-    except ValueError:
-        allowed = ", ".join(member.value for member in RunStatus)
-        raise ValueError(f"unknown status {value!r}; expected one of: {allowed}") from None
 
 
 def _parse_operation(value: str) -> tuple[str, str]:
@@ -117,18 +103,6 @@ def _parse_operation(value: str) -> tuple[str, str]:
     if not sep or not namespace or not name:
         raise ValueError(f"invalid operation {value!r}; expected 'namespace.name'")
     return namespace, name
-
-
-def _parse_timestamp(bound: str, value: str) -> dt.datetime:
-    """Parse an ISO 8601 window bound, naming which bound failed.
-
-    Raises:
-        ValueError: If ``value`` is not an ISO 8601 timestamp.
-    """
-    try:
-        return dt.datetime.fromisoformat(value)
-    except ValueError:
-        raise ValueError(f"invalid --{bound} timestamp {value!r}; expected ISO 8601") from None
 
 
 def build_control_plane() -> App:
