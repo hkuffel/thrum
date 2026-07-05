@@ -7,6 +7,7 @@ the output as a table or JSON. A co-equal projection, not a client of an API.
 
 from __future__ import annotations
 
+import enum
 import json
 import types
 from dataclasses import fields, is_dataclass
@@ -60,6 +61,7 @@ def decode_argv(
 
     Raises:
         TypeError: If an option lacks a value or the inputs fail schema binding.
+        ValueError: If a token does not parse as its annotated type.
     """
     model = classify(operation.fn, capability_types=capability_types)
     annotations = {
@@ -85,30 +87,62 @@ def decode_argv(
 
     inputs: dict[str, Any] = {}
     for name, value in zip(model.input_schema.required, positionals, strict=False):
-        inputs[name] = _coerce(value, annotations[name])
+        inputs[name] = _coerce(name, value, annotations[name])
     for key, value in options.items():
-        inputs[key] = _coerce(value, annotations.get(key, str))
+        inputs[key] = _coerce(key, value, annotations.get(key, str))
 
     model.input_schema.bind(**inputs)
     return inputs
 
 
-def _coerce(value: str, annotation: Any) -> Any:
+def _coerce(name: str, value: str, annotation: Any) -> Any:
     """Coerce a string token to its annotated scalar type.
 
-    An optional type is coerced to its non-``None`` member; anything not int,
-    float, or bool is left as the raw string.
+    An optional type is coerced to its non-``None`` member. Numeric scalars,
+    enums, and ISO 8601 timestamps are parsed; anything else is left as the raw
+    string. A ``datetime`` must carry a UTC offset, since it is compared against
+    timezone-aware columns. ``name`` labels the parameter in a parse-failure message.
+
+    Raises:
+        ValueError: If ``value`` does not parse as the annotated type, or a
+            ``datetime`` value is naive (missing a timezone offset).
     """
     if get_origin(annotation) in (Union, types.UnionType):
         for arg in get_args(annotation):
             if arg is not type(None):
-                return _coerce(value, arg)
+                return _coerce(name, value, arg)
     if annotation is int:
-        return int(value)
+        try:
+            return int(value)
+        except ValueError:
+            raise ValueError(f"invalid {name} {value!r}; expected an integer") from None
     if annotation is float:
-        return float(value)
+        try:
+            return float(value)
+        except ValueError:
+            raise ValueError(f"invalid {name} {value!r}; expected a number") from None
     if annotation is bool:
         return value.lower() in ("1", "true", "yes", "on")
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        try:
+            return annotation(value)
+        except ValueError:
+            allowed = ", ".join(str(member.value) for member in annotation)
+            raise ValueError(f"unknown {name} {value!r}; expected one of: {allowed}") from None
+    if annotation in (datetime, date, time):
+        try:
+            parsed = annotation.fromisoformat(value)
+        except ValueError:
+            raise ValueError(f"invalid {name} timestamp {value!r}; expected ISO 8601") from None
+        # TIMESTAMPTZ columns are compared against timezone-aware datetimes; a naive
+        # value (e.g. a date-only string) would reach asyncpg and raise a non-ValueError,
+        # bypassing the CLI's clean error path. Reject it here instead.
+        if annotation is datetime and parsed.tzinfo is None:
+            raise ValueError(
+                f"invalid {name} timestamp {value!r}; "
+                "expected an ISO 8601 timestamp with a UTC offset"
+            )
+        return parsed
     return value
 
 

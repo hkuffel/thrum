@@ -35,17 +35,43 @@ def runs() -> None:
 
 @runs.command("list")
 @click.option("--dsn", envvar="THRUM_DSN", required=True)
+@click.option("--status", help="Filter by lifecycle status (e.g. succeeded, failed, missed).")
+@click.option("--operation", "operation_key", help="Filter by Operation identity (namespace.name).")
+@click.option("--since", help="Only Runs created at or after this ISO 8601 timestamp.")
+@click.option("--until", help="Only Runs created at or before this ISO 8601 timestamp.")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON instead of a table.")
-def runs_list(dsn: str, as_json: bool) -> None:
+def runs_list(
+    dsn: str,
+    status: str | None,
+    operation_key: str | None,
+    since: str | None,
+    until: str | None,
+    as_json: bool,
+) -> None:
     """List Runs by invoking the control-plane Operation inline against Postgres."""
     import asyncio
 
     from thrum.jobs.builtins import build_control_plane
     from thrum.jobs.projection.cli import project
 
+    argv: list[str] = []
+    for name, value in (
+        ("status", status),
+        ("operation", operation_key),
+        ("since", since),
+        ("until", until),
+    ):
+        if value is not None:
+            argv += [f"--{name}", value]
+
     app = build_control_plane()
     operation = app.operations["thrum.list_runs"]
-    click.echo(asyncio.run(project(app, operation, dsn, argv=[], as_json=as_json)))
+    try:
+        rendered = asyncio.run(project(app, operation, dsn, argv=argv, as_json=as_json))
+    except ValueError as exc:
+        # Turn a malformed filter value into a clean CLI error, not a traceback.
+        raise click.ClickException(str(exc)) from exc
+    click.echo(rendered)
 
 
 @main.group()

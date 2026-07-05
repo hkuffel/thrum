@@ -62,6 +62,20 @@ NEVER NEED TO DO THIS.
 # Derive the lease window from the DB clock, not the Worker's wall clock
 ```
 
+### Describe the code, not the framework's value proposition
+
+A docstring describes what the code does and its contract. It is not the place to
+sell the framework or reach for a term of art from the vision doc ("cron wedge",
+"crontab blindness", "author once, project anywhere") — that vocabulary lives in
+CONTEXT.md and the ADRs. Say plainly what a value is and what happens.
+
+```python
+# WRONG: borrows a value-prop phrase a reader can't cash out locally
+status: ... ``missed`` surfaces the cron wedge.
+# CORRECT: says plainly what the value selects
+status: ... ``missed`` lists scheduled occurrences whose fire time passed unstarted.
+```
+
 ### When a comment earns its place
 
 - A decision with more intuitive alternatives: why this approach over the obvious one.

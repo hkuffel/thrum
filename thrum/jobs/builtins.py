@@ -7,13 +7,14 @@ projections, not clients of an API.
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from thrum.jobs.app import App
-from thrum.jobs.models import Run
+from thrum.jobs.models import Run, RunStatus
 from thrum.jobs.providers import ReadOnly, db_provider
 from thrum.jobs.registry import Registry
 
@@ -43,10 +44,65 @@ class RunView:
 
 
 @control_plane.operation(name="list_runs")
-async def list_runs(*, db: ReadOnly[AsyncSession]) -> list[RunView]:
-    """List all Runs newest-first. Read-only, so exempt from the Zero-Effect flag."""
-    runs = (await db.execute(select(Run).order_by(Run.created_at.desc()))).scalars().all()
+async def list_runs(
+    *,
+    db: ReadOnly[AsyncSession],
+    status: RunStatus | None = None,
+    operation: str | None = None,
+    since: dt.datetime | None = None,
+    until: dt.datetime | None = None,
+) -> list[RunView]:
+    """List Runs newest-first, narrowed by any supplied filters.
+
+    The filters compose. Read-only, so exempt from the Zero-Effect flag.
+
+    Args:
+        status: A lifecycle state to scope to; ``missed`` lists scheduled
+            occurrences whose fire time passed without ever starting.
+        operation: A ``namespace.name`` identity to isolate one Operation.
+        since: The inclusive lower bound of the ``created_at`` window.
+        until: The inclusive upper bound of the ``created_at`` window.
+
+    Raises:
+        ValueError: If ``operation`` is not a ``namespace.name`` key.
+    """
+    query = select(Run).order_by(Run.created_at.desc())
+    query = _apply_filters(query, status, operation, since, until)
+    runs = (await db.execute(query)).scalars().all()
     return [RunView.from_run(run) for run in runs]
+
+
+def _apply_filters(
+    query: Select[tuple[Run]],
+    status: RunStatus | None,
+    operation: str | None,
+    since: dt.datetime | None,
+    until: dt.datetime | None,
+) -> Select[tuple[Run]]:
+    """Narrow the Runs query by each supplied filter."""
+    if status is not None:
+        query = query.where(Run.status == status)
+    if operation is not None:
+        namespace, name = _parse_operation(operation)
+        query = query.where(Run.operation_namespace == namespace, Run.operation_name == name)
+    if since is not None:
+        query = query.where(Run.created_at >= since)
+    if until is not None:
+        query = query.where(Run.created_at <= until)
+    return query
+
+
+def _parse_operation(value: str) -> tuple[str, str]:
+    """Split a ``namespace.name`` operation filter into its two parts.
+
+    Raises:
+        ValueError: If ``value`` lacks a ``.`` separating a non-empty namespace
+            and name.
+    """
+    namespace, sep, name = value.rpartition(".")
+    if not sep or not namespace or not name:
+        raise ValueError(f"invalid operation {value!r}; expected 'namespace.name'")
+    return namespace, name
 
 
 def build_control_plane() -> App:
